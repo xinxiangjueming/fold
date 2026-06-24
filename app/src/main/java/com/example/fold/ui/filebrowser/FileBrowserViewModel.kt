@@ -75,6 +75,17 @@ class FileBrowserViewModel : ViewModel() {
     // 滚动位置记忆：path -> Pair(index, offset)
     private val scrollPositions = mutableMapOf<String, Pair<Int, Int>>()
 
+    // 计算器伪装模式（小爱老师等学习机）
+    private val _calculatorMode = MutableStateFlow(prefs.getBoolean("calculator_mode", false))
+    val calculatorMode: StateFlow<Boolean> = _calculatorMode.asStateFlow()
+
+    fun toggleCalculatorMode() {
+        val newValue = !_calculatorMode.value
+        FoldLogger.i(TAG, "toggleCalculatorMode: ${!newValue} -> $newValue")
+        _calculatorMode.value = newValue
+        prefs.edit().putBoolean("calculator_mode", newValue).apply()
+    }
+
     init {
         FoldLogger.i(TAG, "init: starting FileBrowserViewModel")
         val globalMode = SortMode.fromPref(prefs.getString("global_sort", null))
@@ -176,11 +187,14 @@ class FileBrowserViewModel : ViewModel() {
 
                 // 后台加载文件大小和修改时间（低速设备异步填充）
                 if (!isRestricted && sorted.isNotEmpty() && sorted.any { it.size == 0L && !it.isDirectory }) {
+                    val capturedPath = path
+                    val capturedShowHidden = _state.value.showHiddenFiles
                     viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                        val full = localFileProvider.listFiles(path)
-                        if (_state.value.currentPath == path) {
-                            _files.value = full
-                            FoldLogger.d(TAG, "navigateTo: metadata loaded, ${full.size} files")
+                        val full = localFileProvider.listFiles(capturedPath)
+                        if (_state.value.currentPath == capturedPath) {
+                            val result = if (!capturedShowHidden) full else full.filter { !it.name.startsWith(".") }
+                            _files.value = result
+                            FoldLogger.d(TAG, "navigateTo: metadata loaded, ${result.size} files")
                         }
                     }
                 }
@@ -309,16 +323,25 @@ class FileBrowserViewModel : ViewModel() {
         }
     }
 
-    fun compressZip(file: FileItem) {
-        FoldLogger.i(TAG, "compressZip: ${file.name}")
+    fun compressArchive(file: FileItem, format: String) {
+        FoldLogger.i(TAG, "compressArchive: ${file.name}, format=$format")
         viewModelScope.launch {
-            val outputPath = file.path + ".zip"
-            val result = com.example.fold.data.archive.ArchiveHelper.compressZip(file.path, outputPath)
+            val ext = when (format) {
+                "targz" -> "tar.gz"
+                "7z" -> "7z"
+                else -> "zip"
+            }
+            val outputPath = file.path + ".$ext"
+            val result = when (format) {
+                "targz" -> com.example.fold.data.archive.ArchiveHelper.compressTarGz(file.path, outputPath)
+                "7z" -> com.example.fold.data.archive.ArchiveHelper.compress7z(file.path, outputPath)
+                else -> com.example.fold.data.archive.ArchiveHelper.compressZip(file.path, outputPath)
+            }
             if (result.isSuccess) {
-                FoldLogger.i(TAG, "compressZip: success -> $outputPath")
+                FoldLogger.i(TAG, "compressArchive: success -> $outputPath")
                 refresh()
             } else {
-                FoldLogger.e(TAG, "compressZip: failed", result.exceptionOrNull())
+                FoldLogger.e(TAG, "compressArchive: failed", result.exceptionOrNull())
                 _state.update { it.copy(error = "压缩失败: ${result.exceptionOrNull()?.message}") }
             }
         }

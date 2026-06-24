@@ -82,13 +82,24 @@ fun ReaderScreen(
     val theme = state.readingTheme
     val bgColor = androidx.compose.ui.graphics.Color(theme.bgColor)
     val textColor = androidx.compose.ui.graphics.Color(theme.textColor)
+    FoldLogger.d("Reader", "theme=${theme.label}, isLight=${theme.isLight}, bgColor=$bgColor, textColor=$textColor")
 
     // 用阅读主题颜色覆盖 MaterialTheme，让所有组件跟随主题变化
     val readerColorScheme = MaterialTheme.colorScheme.copy(
         background = bgColor,
         onBackground = textColor,
         surface = bgColor,
-        onSurface = textColor
+        onSurface = textColor,
+        surfaceVariant = bgColor,
+        onSurfaceVariant = textColor,
+        surfaceContainerLowest = bgColor,
+        surfaceContainerLow = bgColor,
+        surfaceContainer = bgColor,
+        surfaceContainerHigh = bgColor,
+        surfaceContainerHighest = bgColor,
+        outline = textColor.copy(alpha = 0.2f),
+        primaryContainer = textColor.copy(alpha = 0.12f),
+        onPrimaryContainer = textColor
     )
 
     LaunchedEffect(filePath) {
@@ -552,30 +563,49 @@ private fun EpubReaderContent(
     val loadedCount = remember { mutableIntStateOf(1) }
     val loadedHtml = remember { mutableStateOf("") }
     val isLoadingMore = remember { mutableStateOf(false) }
+    val isChapterLoading = remember { mutableStateOf(false) }
+    val pendingChapter = remember { mutableIntStateOf(-1) }
 
     // 加载当前章节
     LaunchedEffect(state.currentChapterIndex) {
+        FoldLogger.d("Reader", "chapterSwitch: index=${state.currentChapterIndex}, oldHtml=${loadedHtml.value.length}")
         loadedCount.intValue = 1
-        loadedHtml.value = ""
+        isChapterLoading.value = true
+        if (pendingChapter.intValue == -1) loadedHtml.value = ""
         viewModel.loadEpubChapter(state.currentChapterIndex)
     }
 
     // 当 epubHtml 更新时，追加到 loadedHtml
     LaunchedEffect(epubHtml) {
         if (epubHtml.isNotEmpty()) {
-            if (loadedHtml.value.isEmpty()) {
+            FoldLogger.d("Reader", "epubHtml updated: len=${epubHtml.length}, loadedHtml=${loadedHtml.value.length}")
+            if (pendingChapter.intValue >= 0 || loadedHtml.value.isEmpty()) {
                 loadedHtml.value = epubHtml
             } else {
                 // 追加新章节内容
                 val separator = "<hr style='margin:32px 0;border:none;border-top:1px solid #ccc;'>"
                 loadedHtml.value = loadedHtml.value + separator + epubHtml
             }
+            pendingChapter.intValue = -1
+            isChapterLoading.value = false
             isLoadingMore.value = false
         }
     }
 
-    if (loadedHtml.value.isEmpty() && state.isLoading) {
-        CircularProgressIndicator(modifier = Modifier.fillMaxSize().wrapContentSize())
+    FoldLogger.d("Reader", "EpubReader render: loadedHtml=${loadedHtml.value.length}, isChapterLoading=${isChapterLoading.value}, isLoading=${state.isLoading}")
+
+    if (isChapterLoading.value || (loadedHtml.value.isEmpty() && state.isLoading)) {
+        Box(Modifier.fillMaxSize().background(bgColor), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        return
+    }
+
+    if (loadedHtml.value.isEmpty()) {
+        FoldLogger.w("Reader", "loadedHtml empty after loading complete, index=${state.currentChapterIndex}")
+        Box(Modifier.fillMaxSize().background(bgColor), contentAlignment = Alignment.Center) {
+            Text("加载失败", color = textColor)
+        }
         return
     }
 
@@ -621,15 +651,15 @@ private fun EpubReaderContent(
                                 "left" -> {
                                     val next = cur + loadedCount.intValue
                                     if (next < chapters.size) {
+                                        pendingChapter.intValue = next
                                         loadedCount.intValue = 1
-                                        loadedHtml.value = ""
                                         viewModel.loadEpubChapter(next)
                                     }
                                 }
                                 "right" -> {
                                     if (cur > 0) {
+                                        pendingChapter.intValue = cur - 1
                                         loadedCount.intValue = 1
-                                        loadedHtml.value = ""
                                         viewModel.loadEpubChapter(cur - 1)
                                     }
                                 }
@@ -804,8 +834,8 @@ private fun ChapterListSheet(chapters: List<Chapter>, currentIndex: Int, onSelec
                 .padding(16.dp)
         ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(R.string.reader_chapters), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                    IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close)) }
+                    Text(stringResource(R.string.reader_chapters), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
+                    IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close), tint = MaterialTheme.colorScheme.onSurface) }
                 }
                 LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                     itemsIndexed(chapters, key = { idx, ch -> ch.startIndex }) { index, chapter ->
@@ -826,6 +856,7 @@ private fun ChapterListSheet(chapters: List<Chapter>, currentIndex: Int, onSelec
                                 text = chapter.title.ifBlank { stringResource(R.string.reader_untitled_chapter, index + 1) },
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                         }
                     }
@@ -851,8 +882,8 @@ private fun BookmarkListSheet(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(R.string.reader_bookmarks), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                    IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close)) }
+                    Text(stringResource(R.string.reader_bookmarks), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
+                    IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close), tint = MaterialTheme.colorScheme.onSurface) }
                 }
                 if (bookmarks.isEmpty()) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -872,7 +903,8 @@ private fun BookmarkListSheet(
                                         Text(
                                             text = entry.chapterTitle.ifBlank { stringResource(R.string.reader_untitled_chapter, entry.chapterIndex + 1) },
                                             style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.Medium
+                                            fontWeight = FontWeight.Medium,
+                                            color = MaterialTheme.colorScheme.onSurface
                                         )
                                         Text(
                                             text = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(entry.timestamp)),

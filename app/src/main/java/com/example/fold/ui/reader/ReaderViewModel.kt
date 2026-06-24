@@ -247,13 +247,20 @@ class ReaderViewModel : ViewModel() {
     }
 
     fun loadEpubChapter(index: Int) {
-        FoldLogger.d(TAG, "loadEpubChapter: index=$index")
+        FoldLogger.i(TAG, "loadEpubChapter: index=$index")
         viewModelScope.launch {
-            epubReader.updateChapterIndex(index)
-            _epubHtml.value = epubReader.getChapterHtml(index)
-            _state.update { it.copy(currentChapterIndex = index) }
-            saveProgress(index)
-            FoldLogger.d(TAG, "loadEpubChapter: done, htmlLen=${_epubHtml.value.length}")
+            try {
+                epubReader.updateChapterIndex(index)
+                val html = epubReader.getChapterHtml(index)
+                FoldLogger.i(TAG, "loadEpubChapter: got html, len=${html.length}, index=$index")
+                _epubHtml.value = html
+                _state.update { it.copy(currentChapterIndex = index) }
+                saveProgress(index)
+                FoldLogger.d(TAG, "loadEpubChapter: done, htmlLen=${_epubHtml.value.length}")
+            } catch (e: Exception) {
+                FoldLogger.e(TAG, "loadEpubChapter: FAILED index=$index", e)
+                _epubHtml.value = ""
+            }
         }
     }
 

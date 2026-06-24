@@ -1,7 +1,7 @@
 package com.example.fold.ui.viewer
 
+import android.util.Log
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -129,13 +129,63 @@ private fun ZoomableImage(file: java.io.File) {
                 translationY = offsetY
             )
             .pointerInput(Unit) {
-                detectTransformGestures { _, pan, zoom, _ ->
-                    scale = (scale * zoom).coerceIn(0.5f, 5f)
-                    offsetX += pan.x
-                    offsetY += pan.y
-                    if (scale <= 1f) {
-                        offsetX = 0f
-                        offsetY = 0f
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val pressed = event.changes.filter { it.pressed }
+
+                        if (pressed.size >= 2) {
+                            // 双指：缩放 + 平移
+                            val p0 = pressed[0].position
+                            val p1 = pressed[1].position
+                            val span = kotlin.math.hypot(
+                                (p0.x - p1.x).toDouble(),
+                                (p0.y - p1.y).toDouble()
+                            ).toFloat()
+                            val centroid = androidx.compose.ui.geometry.Offset(
+                                (p0.x + p1.x) / 2f, (p0.y + p1.y) / 2f
+                            )
+
+                            if (pressed[0].previousPressed && pressed[1].previousPressed) {
+                                val prevP0 = pressed[0].previousPosition
+                                val prevP1 = pressed[1].previousPosition
+                                val prevSpan = kotlin.math.hypot(
+                                    (prevP0.x - prevP1.x).toDouble(),
+                                    (prevP0.y - prevP1.y).toDouble()
+                                ).toFloat()
+                                val prevCentroid = androidx.compose.ui.geometry.Offset(
+                                    (prevP0.x + prevP1.x) / 2f, (prevP0.y + prevP1.y) / 2f
+                                )
+
+                                if (prevSpan > 0f) {
+                                    scale = (scale * span / prevSpan).coerceIn(0.5f, 5f)
+                                    if (scale > 1f) {
+                                        offsetX += centroid.x - prevCentroid.x
+                                        offsetY += centroid.y - prevCentroid.y
+                                    }
+                                }
+                            }
+                            event.changes.forEach { it.consume() }
+                            Log.d("ImageViewer", "pinch: scale=$scale")
+                        } else if (pressed.size == 1 && scale > 1f) {
+                            // 单指 + 已缩放：平移
+                            val change = pressed[0]
+                            if (change.previousPressed) {
+                                val pan = change.position - change.previousPosition
+                                offsetX += pan.x
+                                offsetY += pan.y
+                                change.consume()
+                            }
+                        }
+                        // 单指 + 未缩放：不 consume，交给 HorizontalPager
+
+                        // 手指全部抬起时重置
+                        if (event.changes.all { !it.pressed }) {
+                            if (scale <= 1f) {
+                                scale = 1f; offsetX = 0f; offsetY = 0f
+                            }
+                            Log.d("ImageViewer", "gestureEnd: scale=$scale, offset=($offsetX,$offsetY)")
+                        }
                     }
                 }
             }

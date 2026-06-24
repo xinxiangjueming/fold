@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.apache.commons.compress.archivers.sevenz.SevenZFile
+import org.apache.commons.compress.archivers.sevenz.SevenZOutputFile
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
@@ -129,6 +130,40 @@ object ArchiveHelper {
             Result.success(outputPath)
         } catch (e: Exception) {
             FoldLogger.e(TAG, "compressTarGz failed: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    /** 压缩为 7Z */
+    suspend fun compress7z(
+        sourceDir: String,
+        outputPath: String,
+        onProgress: ((String, Int, Int) -> Unit)? = null
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val source = File(sourceDir)
+        val output = File(outputPath)
+        try {
+            val allFiles = source.walkTopDown().filter { it.isFile }.toList()
+            SevenZOutputFile(output).use { szof ->
+                allFiles.forEachIndexed { i, file ->
+                    val entryName = file.relativeTo(source).path
+                    val entry = szof.createArchiveEntry(file, entryName)
+                    szof.putArchiveEntry(entry)
+                    file.inputStream().use { input ->
+                        val buf = ByteArray(8192)
+                        var len: Int
+                        while (input.read(buf).also { len = it } != -1) {
+                            szof.write(buf, 0, len)
+                        }
+                    }
+                    szof.closeArchiveEntry()
+                    onProgress?.invoke(file.name, i + 1, allFiles.size)
+                }
+            }
+            FoldLogger.i(TAG, "compressed 7Z: $outputPath (${output.length() / 1024}KB)")
+            Result.success(outputPath)
+        } catch (e: Exception) {
+            FoldLogger.e(TAG, "compress7z failed: ${e.message}")
             Result.failure(e)
         }
     }

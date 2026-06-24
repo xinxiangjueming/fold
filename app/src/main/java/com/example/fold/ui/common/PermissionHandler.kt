@@ -33,6 +33,9 @@ fun PermissionHandler(
     val context = LocalContext.current
 
     fun isStorageGranted(): Boolean {
+        // 系统 app 直接放行，无需运行时请求存储权限
+        val isSystem = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0
+        if (isSystem) return true
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             Environment.isExternalStorageManager()
         } else {

@@ -62,6 +62,7 @@ fun FileBrowserScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val files by viewModel.files.collectAsStateWithLifecycle()
+    val calculatorMode by viewModel.calculatorMode.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     // 每次进入页面时重新检查 Shizuku 状态
@@ -81,6 +82,8 @@ fun FileBrowserScreen(
     var menuTargetFile by remember { mutableStateOf<FileItem?>(null) }
     // 更多选项菜单
     var showMoreMenu by remember { mutableStateOf(false) }
+    // 压缩格式选择
+    var compressTargetFile by remember { mutableStateOf<FileItem?>(null) }
 
     // 返回手势处理：非根目录→返回上级，根目录→双击退出
     var backPressedTime by remember { mutableStateOf(0L) }
@@ -103,7 +106,7 @@ fun FileBrowserScreen(
     }
 
     // 不用 Scaffold，避免 contentWindowInsets 每帧重算布局
-    // 不用 Scaffold，避免 contentWindowInsets 每帧重算布局
+    FoldLogger.d(TAG, "FileBrowserScreen recompose: darkModeState=${com.example.fold.ui.theme.darkModeState.intValue}, background=${MaterialTheme.colorScheme.background}, onSurface=${MaterialTheme.colorScheme.onSurface}, surface=${MaterialTheme.colorScheme.surface}")
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Column(
             Modifier
@@ -177,8 +180,21 @@ fun FileBrowserScreen(
                             )
                             DropdownMenuItem(
                                 text = { Text(stringResource(if (state.showHiddenFiles) R.string.hide_hidden_files else R.string.show_hidden_files)) },
-                                onClick = { showMoreMenu = false; viewModel.toggleHiddenFiles() },
+                                onClick = {
+                                    FoldLogger.d(TAG, "menu: toggleHiddenFiles clicked, current=${state.showHiddenFiles}")
+                                    showMoreMenu = false
+                                    viewModel.toggleHiddenFiles()
+                                },
                                 leadingIcon = { Icon(if (state.showHiddenFiles) Icons.Filled.VisibilityOff else Icons.Filled.Visibility, contentDescription = null) }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(if (calculatorMode) R.string.calculator_mode_off else R.string.calculator_mode_on)) },
+                                onClick = {
+                                    FoldLogger.d(TAG, "menu: toggleCalculatorMode clicked, current=$calculatorMode")
+                                    showMoreMenu = false
+                                    viewModel.toggleCalculatorMode()
+                                },
+                                leadingIcon = { Icon(Icons.Filled.Calculate, contentDescription = null) }
                             )
                         }
                     }
@@ -253,6 +269,7 @@ fun FileBrowserScreen(
                     2 -> false
                     else -> androidx.compose.foundation.isSystemInDarkTheme()
                 }
+                FoldLogger.d(TAG, "RecyclerView isDark=$isDark, darkModeState=${com.example.fold.ui.theme.darkModeState.intValue}")
                 val adapter = remember {
                     FileListAdapter(
                         onClick = { file ->
@@ -306,6 +323,12 @@ fun FileBrowserScreen(
                     FoldLogger.d(TAG, "submitList: ${files.size} items")
                     adapter.submitList(files)
                 }
+                // 深浅色变化时更新 adapter 颜色并刷新所有可见 item
+                LaunchedEffect(isDark) {
+                    FoldLogger.d(TAG, "isDark changed: $isDark, updating adapter colors")
+                    adapter.isDark = isDark
+                    adapter.notifyDataSetChanged()
+                }
                 AndroidView(
                     factory = { ctx ->
                         androidx.recyclerview.widget.RecyclerView(ctx).apply {
@@ -336,7 +359,7 @@ fun FileBrowserScreen(
                     },
                     update = { rv ->
                         // 检测 RecyclerView 是否被不必要地 recompose
-                        FoldLogger.d(TAG, "AndroidView update: files=${files.size}")
+                        FoldLogger.d(TAG, "AndroidView update: files=${files.size}, isDark=$isDark")
                         // 文件列表更新后恢复滚动位置
                         rv.doOnNextLayout {
                             val (index, offset) = viewModel.getSavedScrollPosition()
@@ -414,6 +437,45 @@ fun FileBrowserScreen(
             )
         }
 
+        // 压缩格式选择弹窗
+        compressTargetFile?.let { file ->
+            AlertDialog(
+                onDismissRequest = { compressTargetFile = null },
+                title = { Text(stringResource(R.string.compress_format_title), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) },
+                text = {
+                    Column {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.action_compress_zip)) },
+                            onClick = {
+                                compressTargetFile = null
+                                viewModel.compressArchive(file, "zip")
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.action_compress_targz)) },
+                            onClick = {
+                                compressTargetFile = null
+                                viewModel.compressArchive(file, "targz")
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.action_compress_7z)) },
+                            onClick = {
+                                compressTargetFile = null
+                                viewModel.compressArchive(file, "7z")
+                            }
+                        )
+                    }
+                },
+                confirmButton = {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                        TextButton(onClick = { compressTargetFile = null }) { Text(stringResource(R.string.action_cancel)) }
+                    }
+                },
+                shape = RoundedCornerShape(16.dp)
+            )
+        }
+
         // 长按操作菜单（屏幕级，只创建一个实例）
         if (menuTargetFile != null) {
             val file = menuTargetFile!!
@@ -461,8 +523,8 @@ fun FileBrowserScreen(
                         }
                         if (file.isDirectory) {
                             DropdownMenuItem(
-                                text = { Text(stringResource(R.string.action_compress_zip)) },
-                                onClick = { menuTargetFile = null; viewModel.compressZip(file) },
+                                text = { Text(stringResource(R.string.action_compress)) },
+                                onClick = { menuTargetFile = null; compressTargetFile = file },
                                 leadingIcon = { Icon(Icons.Filled.Archive, contentDescription = null) }
                             )
                         }
@@ -513,10 +575,14 @@ private fun RenameDialog(currentName: String, onConfirm: (String) -> Unit, onDis
     FoldLogger.d(TAG, "RenameDialog: currentName=$currentName")
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.action_rename)) },
+        title = { Text(stringResource(R.string.action_rename), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) },
         text = { OutlinedTextField(value = newName, onValueChange = { newName = it }, singleLine = true, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) },
-        confirmButton = { TextButton(onClick = { if (newName.isNotBlank()) onConfirm(newName) }) { Text(stringResource(R.string.action_save)) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
+        confirmButton = {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                TextButton(onClick = { if (newName.isNotBlank()) onConfirm(newName) }) { Text(stringResource(R.string.action_save)) }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+            }
+        },
         shape = RoundedCornerShape(16.dp)
     )
 }
@@ -528,7 +594,7 @@ private fun PropertiesDialog(file: FileItem, onDismiss: () -> Unit) {
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.action_properties)) },
+        title = { Text(stringResource(R.string.action_properties), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 PropertyRow(stringResource(R.string.prop_name), file.name)
@@ -538,7 +604,11 @@ private fun PropertiesDialog(file: FileItem, onDismiss: () -> Unit) {
                 PropertyRow(stringResource(R.string.prop_modified), modifiedText)
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) } },
+        confirmButton = {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) }
+            }
+        },
         shape = RoundedCornerShape(16.dp)
     )
 }
@@ -574,7 +644,7 @@ private fun SortDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.sort_title)) },
+        title = { Text(stringResource(R.string.sort_title), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) },
         text = {
             Column {
                 options.forEach { (mode, label) ->
@@ -607,12 +677,14 @@ private fun SortDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = {
-                FoldLogger.d(TAG, "SortDialog: confirmed, selectedMode=$selectedMode, folderOnly=$localFolderOnly")
-                onFolderOnlyChange(localFolderOnly); onConfirm(selectedMode, localFolderOnly)
-            }) { Text(stringResource(R.string.action_save)) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                TextButton(onClick = {
+                    FoldLogger.d(TAG, "SortDialog: confirmed, selectedMode=$selectedMode, folderOnly=$localFolderOnly")
+                    onFolderOnlyChange(localFolderOnly); onConfirm(selectedMode, localFolderOnly)
+                }) { Text(stringResource(R.string.action_save)) }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+            }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
         shape = RoundedCornerShape(16.dp)
     )
 }
@@ -623,7 +695,7 @@ private fun HttpServerDialog(serverUrl: String, onStop: () -> Unit, onDismiss: (
     val clipboardManager = LocalClipboardManager.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.http_server)) },
+        title = { Text(stringResource(R.string.http_server), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(stringResource(R.string.http_server_running), style = MaterialTheme.typography.bodyMedium)
@@ -650,11 +722,10 @@ private fun HttpServerDialog(serverUrl: String, onStop: () -> Unit, onDismiss: (
             }
         },
         confirmButton = {
-            Row {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 TextButton(onClick = {
                     clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(serverUrl))
                 }) { Text(stringResource(R.string.action_copy_path)) }
-                Spacer(Modifier.width(8.dp))
                 TextButton(onClick = {
                     FoldLogger.i(TAG, "HttpServerDialog: stop server")
                     onStop()

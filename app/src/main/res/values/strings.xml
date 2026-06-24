@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Fold</string>
+    <string name="app_name">计算器</string>
 
     <!-- 通用 -->
     <string name="action_back">返回</string>
@@ -99,7 +99,13 @@
     <string name="action_off">关</string>
     <string name="action_extract">解压</string>
     <string name="action_extract_all">全部解压</string>
+    <string name="action_compress">压缩</string>
     <string name="action_compress_zip">压缩为 ZIP</string>
+    <string name="action_compress_targz">压缩为 TAR.GZ</string>
+    <string name="action_compress_7z">压缩为 7Z</string>
+    <string name="compress_format_title">选择压缩格式</string>
+    <string name="calculator_mode_on">开启计算器伪装</string>
+    <string name="calculator_mode_off">关闭计算器伪装</string>
 
     <!-- 文件类型 -->
     <string name="file_type_folder">文件夹</string>
@@ -116,7 +122,7 @@
 
     <!-- 权限 -->
     <string name="permission_title">需要存储权限</string>
-    <string name="permission_description">Fold 需要访问设备存储来浏览和管理文件</string>
+    <string name="permission_description">需要访问设备存储来浏览和管理文件</string>
     <string name="permission_grant">授权访问</string>
     <string name="permission_retry">重新授权</string>
     <string name="permission_open_settings">前往设置开启</string>

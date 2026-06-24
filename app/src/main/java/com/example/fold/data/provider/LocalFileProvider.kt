@@ -24,6 +24,11 @@ class LocalFileProvider : FileProvider {
         fastCache.remove(path)
     }
 
+    fun clearAllCaches() {
+        listCache.clear()
+        fastCache.clear()
+    }
+
     override suspend fun listFiles(path: String): List<FileItem> = withContext(Dispatchers.IO) {
         listCache[path]?.let { return@withContext it }
 

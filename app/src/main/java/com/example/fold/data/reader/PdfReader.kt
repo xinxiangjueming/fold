@@ -91,7 +91,7 @@ class PdfReader : ContentReader {
             val sampledWidth = page.width / inSampleSize
             val sampledHeight = page.height / inSampleSize
             FoldLogger.d(TAG, "renderPage: pageIndex=$pageIndex, srcSize=${page.width}x${page.height}, sampledSize=${sampledWidth}x${sampledHeight}, inSampleSize=$inSampleSize")
-            val bitmap = Bitmap.createBitmap(sampledWidth, sampledHeight, Bitmap.Config.RGB_565)
+            val bitmap = Bitmap.createBitmap(sampledWidth, sampledHeight, Bitmap.Config.ARGB_8888)
             val matrix = android.graphics.Matrix()
             matrix.setScale(1f / inSampleSize, 1f / inSampleSize)
             page.render(bitmap, null, matrix, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)

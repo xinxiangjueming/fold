@@ -18,7 +18,7 @@ import com.example.fold.data.model.FileItem
 class FileListAdapter(
     private val onClick: (FileItem) -> Unit,
     private val onLongPress: (FileItem) -> Unit,
-    private val isDark: Boolean
+    var isDark: Boolean
 ) : ListAdapter<FileItem, FileListAdapter.VH>(Diff) {
 
     init { setHasStableIds(true) }
@@ -77,6 +77,7 @@ class FileListAdapter(
 
     override fun onBindViewHolder(holder: VH, position: Int) {
         val file = getItem(position)
+        Log.d("FileListAdapter", "onBind: pos=$position, isDark=$isDark, title=${file.name}, titleColor=${if (isDark) "0xFFE0E0E0" else "0xFF1F1F1F"}, subColor=${if (isDark) "0xFF9E9E9E" else "0xFF8A8A8A"}")
         val dp = holder.itemView.context.resources.displayMetrics.density
 
         holder.icon.setImageResource(getIconRes(file))

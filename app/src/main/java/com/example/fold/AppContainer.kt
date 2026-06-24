@@ -57,6 +57,7 @@ object AppContainer {
         return "http://$ip:$port"
     }
 
+    @Suppress("DEPRECATION")
     private fun getLocalIp(): String {
         try {
             val wm = appContext.getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager

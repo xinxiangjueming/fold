@@ -6,6 +6,8 @@ import android.os.Build
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
@@ -109,7 +111,7 @@ fun FoldTheme(
         2 -> false
         else -> systemDark
     }
-    val materialColors = if (darkTheme) DarkColors else LightColors
+    android.util.Log.d("Theme", "FoldTheme recompose: darkMode=$darkMode, systemDark=$systemDark, darkTheme=$darkTheme")
 
     val view = LocalView.current
     if (!view.isInEditMode) {
@@ -134,16 +136,35 @@ fun FoldTheme(
         // 状态栏颜色跟随主题变化（轻量级，可以放 SideEffect）
         SideEffect {
             @Suppress("DEPRECATION")
-            window.statusBarColor = materialColors.background.toArgb()
+            window.statusBarColor = (if (darkTheme) DarkColors.background else LightColors.background).toArgb()
             WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
         }
     }
 
     CompositionLocalProvider(LocalDarkMode provides darkMode) {
-        MaterialTheme(
-            colorScheme = materialColors,
-            content = content
+        val animSpec = tween<androidx.compose.ui.graphics.Color>(300)
+        val targetColors = if (darkTheme) DarkColors else LightColors
+        val animatedColors = targetColors.copy(
+            primary = animateColorAsState(targetColors.primary, animSpec, "primary").value,
+            onPrimary = animateColorAsState(targetColors.onPrimary, animSpec, "onPrimary").value,
+            primaryContainer = animateColorAsState(targetColors.primaryContainer, animSpec, "primaryContainer").value,
+            onPrimaryContainer = animateColorAsState(targetColors.onPrimaryContainer, animSpec, "onPrimaryContainer").value,
+            background = animateColorAsState(targetColors.background, animSpec, "background").value,
+            onBackground = animateColorAsState(targetColors.onBackground, animSpec, "onBackground").value,
+            surface = animateColorAsState(targetColors.surface, animSpec, "surface").value,
+            onSurface = animateColorAsState(targetColors.onSurface, animSpec, "onSurface").value,
+            surfaceVariant = animateColorAsState(targetColors.surfaceVariant, animSpec, "surfaceVariant").value,
+            onSurfaceVariant = animateColorAsState(targetColors.onSurfaceVariant, animSpec, "onSurfaceVariant").value,
+            surfaceContainerLowest = animateColorAsState(targetColors.surfaceContainerLowest, animSpec, "sCLowest").value,
+            surfaceContainerLow = animateColorAsState(targetColors.surfaceContainerLow, animSpec, "sCLow").value,
+            surfaceContainer = animateColorAsState(targetColors.surfaceContainer, animSpec, "sC").value,
+            surfaceContainerHigh = animateColorAsState(targetColors.surfaceContainerHigh, animSpec, "sCHigh").value,
+            surfaceContainerHighest = animateColorAsState(targetColors.surfaceContainerHighest, animSpec, "sCHighest").value,
+            outline = animateColorAsState(targetColors.outline, animSpec, "outline").value,
+            error = animateColorAsState(targetColors.error, animSpec, "error").value,
+            onError = animateColorAsState(targetColors.onError, animSpec, "onError").value,
         )
+        MaterialTheme(colorScheme = animatedColors, content = content)
     }
 }
 
@@ -152,8 +173,10 @@ fun FoldTheme(
  * 同时更新全局状态（触发重组）和 SharedPreferences（持久化）
  */
 fun toggleDarkMode(context: Context) {
-    val next = (darkModeState.intValue + 1) % 3
+    val old = darkModeState.intValue
+    val next = (old + 1) % 3
     darkModeState.intValue = next
     context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         .edit().putInt(KEY_DARK_MODE, next).apply()
+    android.util.Log.i("Theme", "toggleDarkMode: $old -> $next (0=系统,1=深色,2=浅色)")
 }

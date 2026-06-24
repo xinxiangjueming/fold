@@ -170,8 +170,7 @@ class EpubReader : ContentReader {
                 }
                 XmlPullParser.END_TAG -> {
                     if (parser.name == "navPoint" && title != null && href != null) {
-                        val t = title; val h = href
-                        if (t != null && h != null) result[h.substringBefore('#')] = t
+                        result[href.substringBefore('#')] = title
                         title = null; href = null
                     }
                 }
@@ -186,9 +185,9 @@ class EpubReader : ContentReader {
             FoldLogger.d(TAG, "getChapterHtml: cache hit, index=$index")
             return@withContext it
         }
-        val zip = zipFile ?: return@withContext ""
+        val zip = zipFile ?: run { FoldLogger.e(TAG, "getChapterHtml: zipFile is null"); return@withContext "" }
         if (index !in spineItems.indices) {
-            FoldLogger.w(TAG, "getChapterHtml: index=$index out of range")
+            FoldLogger.w(TAG, "getChapterHtml: index=$index out of range (spineItems=${spineItems.size})")
             return@withContext ""
         }
 
@@ -197,7 +196,10 @@ class EpubReader : ContentReader {
         FoldLogger.d(TAG, "getChapterHtml: index=$index, href=$href, fullPath=$fullPath")
 
         try {
-            val entry = zip.getEntry(fullPath) ?: zip.getEntry(href) ?: return@withContext ""
+            val entry = zip.getEntry(fullPath) ?: zip.getEntry(href) ?: run {
+                FoldLogger.e(TAG, "getChapterHtml: zip entry not found: fullPath=$fullPath, href=$href")
+                return@withContext ""
+            }
             val html = zip.getInputStream(entry).bufferedReader().readText()
             FoldLogger.v(TAG, "getChapterHtml: rawHtmlLen=${html.length}")
             val bodyContent = extractBody(html)

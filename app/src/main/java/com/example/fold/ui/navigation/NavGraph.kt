@@ -3,17 +3,20 @@ package com.example.fold.ui.navigation
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.example.fold.ui.filebrowser.FileBrowserScreen
+import com.example.fold.ui.calculator.CalculatorScreen
 import com.example.fold.ui.reader.ReaderScreen
 import com.example.fold.ui.viewer.ArchiveViewerScreen
 import com.example.fold.ui.viewer.ImageViewerScreen
 
 object Routes {
+    const val CALCULATOR = "calculator"
     const val FILE_BROWSER = "file_browser"
     const val READER = "reader/{filePath}"
     const val READER_BASE = "reader"
@@ -39,22 +42,38 @@ private const val ANIM_DURATION = 250
 
 @Composable
 fun AppNavGraph(navController: NavHostController) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // 每次重组都读取，确保切换后立即生效（不需要重启app）
+    val calculatorMode = context.getSharedPreferences("file_sort", android.content.Context.MODE_PRIVATE)
+        .getBoolean("calculator_mode", false)
+    val startDest = if (calculatorMode) Routes.CALCULATOR else Routes.FILE_BROWSER
+
     NavHost(
         navController = navController,
-        startDestination = Routes.FILE_BROWSER,
+        startDestination = startDest,
         enterTransition = {
-            slideInHorizontally(initialOffsetX = { it }, animationSpec = tween(ANIM_DURATION))
+            fadeIn(animationSpec = tween(ANIM_DURATION))
         },
         exitTransition = {
-            ExitTransition.None
+            fadeOut(animationSpec = tween(ANIM_DURATION))
         },
         popEnterTransition = {
-            EnterTransition.None
+            fadeIn(animationSpec = tween(ANIM_DURATION))
         },
         popExitTransition = {
-            slideOutHorizontally(targetOffsetX = { it }, animationSpec = tween(ANIM_DURATION))
+            fadeOut(animationSpec = tween(ANIM_DURATION))
         }
     ) {
+        composable(Routes.CALCULATOR) {
+            CalculatorScreen(
+                onUnlock = {
+                    navController.navigate(Routes.FILE_BROWSER) {
+                        popUpTo(Routes.CALCULATOR) { inclusive = true }
+                    }
+                }
+            )
+        }
+
         composable(Routes.FILE_BROWSER) {
             FileBrowserScreen(
                 onFileClick = { filePath ->

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Fold</string>
+    <string name="app_name">計算機</string>
 
     <!-- 通用 -->
     <string name="action_back">返回</string>
@@ -87,6 +87,8 @@
     <string name="action_extract">解壓</string>
     <string name="action_extract_all">全部解壓</string>
     <string name="action_compress_zip">壓縮為 ZIP</string>
+    <string name="calculator_mode_on">開啟計算機偽裝</string>
+    <string name="calculator_mode_off">關閉計算機偽裝</string>
 
     <!-- 檔案類型 -->
     <string name="file_type_folder">資料夾</string>
@@ -96,7 +98,7 @@
 
     <!-- 權限 -->
     <string name="permission_title">需要儲存權限</string>
-    <string name="permission_description">Fold 需要存取裝置儲存空間來瀏覽和管理檔案</string>
+    <string name="permission_description">需要存取裝置儲存空間來瀏覽和管理檔案</string>
     <string name="permission_grant">授權存取</string>
     <string name="permission_retry">重新授權</string>
     <string name="permission_open_settings">前往設定開啟</string>

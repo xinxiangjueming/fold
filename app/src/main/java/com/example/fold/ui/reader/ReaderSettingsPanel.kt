@@ -53,20 +53,20 @@ internal fun ReaderSettingsPanel(
         elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
     ) {
         Column(modifier = Modifier.padding(20.dp).verticalScroll(rememberScrollState())) {
-            Text(stringResource(R.string.reader_settings), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 16.dp))
+            Text(stringResource(R.string.reader_settings), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 16.dp), color = MaterialTheme.colorScheme.onSurface)
 
             // 字号
-            Text(stringResource(R.string.reader_font_size, state.fontSize.toInt()))
+            Text(stringResource(R.string.reader_font_size, state.fontSize.toInt()), color = MaterialTheme.colorScheme.onSurface)
             Slider(value = state.fontSize, onValueChange = onFontSizeChange, valueRange = 12f..28f, steps = 15)
             Spacer(Modifier.height(8.dp))
 
             // 行距
-            Text(stringResource(R.string.reader_line_spacing, "%.1f".format(state.lineSpacing)))
+            Text(stringResource(R.string.reader_line_spacing, "%.1f".format(state.lineSpacing)), color = MaterialTheme.colorScheme.onSurface)
             Slider(value = state.lineSpacing, onValueChange = onLineSpacingChange, valueRange = 1.0f..3.0f, steps = 19)
             Spacer(Modifier.height(12.dp))
 
             // 阅读主题
-            Text(stringResource(R.string.reader_theme), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(bottom = 8.dp))
+            Text(stringResource(R.string.reader_theme), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(bottom = 8.dp), color = MaterialTheme.colorScheme.onSurface)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -100,7 +100,7 @@ internal fun ReaderSettingsPanel(
             Spacer(Modifier.height(12.dp))
 
             // 边距
-            Text(stringResource(R.string.reader_margin, state.marginLeft.toInt(), state.marginRight.toInt()), style = MaterialTheme.typography.bodyMedium)
+            Text(stringResource(R.string.reader_margin, state.marginLeft.toInt(), state.marginRight.toInt()), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
             Spacer(Modifier.height(4.dp))
             Text(stringResource(R.string.reader_margin_left), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Slider(value = state.marginLeft, onValueChange = { onMarginsChange(it, state.marginRight) }, valueRange = 0f..60f, steps = 11)
@@ -114,7 +114,7 @@ internal fun ReaderSettingsPanel(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.reader_re_segment), style = MaterialTheme.typography.bodyMedium)
+                    Text(stringResource(R.string.reader_re_segment), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
                     Text(stringResource(R.string.reader_re_segment_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Switch(checked = state.reSegment, onCheckedChange = { onReSegmentToggle() })
@@ -132,7 +132,7 @@ internal fun ReaderSettingsPanel(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.chinese_convert), style = MaterialTheme.typography.bodyMedium)
+                    Text(stringResource(R.string.chinese_convert), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
                     Text(chineseConvertLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 TextButton(onClick = onChineseConvertCycle) {
@@ -146,7 +146,7 @@ internal fun ReaderSettingsPanel(
             Spacer(Modifier.height(12.dp))
 
             // 字体
-            Text(stringResource(R.string.reader_font), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(bottom = 8.dp))
+            Text(stringResource(R.string.reader_font), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(bottom = 8.dp), color = MaterialTheme.colorScheme.onSurface)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val fontName = if (state.fontPath.isNotEmpty() && File(state.fontPath).exists()) {
                     File(state.fontPath).nameWithoutExtension
@@ -174,7 +174,7 @@ internal fun ReaderSettingsPanel(
             ) {
                 Icon(Icons.Filled.FindReplace, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text(stringResource(R.string.reader_word_replace))
+                Text(stringResource(R.string.reader_word_replace), color = MaterialTheme.colorScheme.onSurface)
                 Spacer(Modifier.weight(1f))
                 Text("${state.wordReplacements.size}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }

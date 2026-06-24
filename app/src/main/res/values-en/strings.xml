@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Fold</string>
+    <string name="app_name">Calculator</string>
 
     <!-- Common -->
     <string name="action_back">Back</string>
@@ -99,6 +99,8 @@
     <string name="action_extract">Extract</string>
     <string name="action_extract_all">Extract All</string>
     <string name="action_compress_zip">Compress to ZIP</string>
+    <string name="calculator_mode_on">Calculator disguise on</string>
+    <string name="calculator_mode_off">Calculator disguise off</string>
 
     <!-- File Types -->
     <string name="file_type_folder">Folder</string>
@@ -115,7 +117,7 @@
 
     <!-- Permission -->
     <string name="permission_title">Storage Permission Required</string>
-    <string name="permission_description">Fold needs access to your device storage to browse and manage files</string>
+    <string name="permission_description">Needs access to your device storage to browse and manage files</string>
     <string name="permission_grant">Grant Access</string>
     <string name="permission_retry">Retry Permission</string>
     <string name="permission_open_settings">Open Settings</string>

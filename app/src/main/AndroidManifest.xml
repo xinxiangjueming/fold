@@ -7,6 +7,9 @@
     <!-- Shizuku -->
     <uses-permission android:name="rikka.shizuku.permission.API_V3" />
 
+    <!-- Haptic feedback -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
     <!-- Storage -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
