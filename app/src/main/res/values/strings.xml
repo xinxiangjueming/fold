@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Fold</string>
+
+    <!-- 通用 -->
+    <string name="action_back">返回</string>
+    <string name="action_close">关闭</string>
+    <string name="action_refresh">刷新</string>
+    <string name="action_more">更多</string>
+    <string name="action_delete">删除</string>
+    <string name="delete_failed">删除失败: %1$s</string>
+    <string name="permission_denied_hint">存储权限未授权，请前往设置开启「所有文件访问」权限</string>
+    <string name="action_rename">重命名</string>
+    <string name="action_copy_path">复制路径</string>
+    <string name="action_share">分享</string>
+    <string name="action_properties">属性</string>
+    <string name="action_edit">编辑</string>
+    <string name="action_save">保存</string>
+    <string name="action_update">更新</string>
+    <string name="action_cancel">取消</string>
+    <string name="action_up">返回上级</string>
+
+    <!-- 退出确认 -->
+    <string name="press_again_to_exit">再按一次退出程序</string>
+
+    <!-- 文件浏览 -->
+    <string name="empty_folder">此文件夹为空</string>
+    <string name="sort_title">文件排序</string>
+    <string name="sort_name_asc">名称 A→Z</string>
+    <string name="sort_name_desc">名称 Z→A</string>
+    <string name="sort_date_newest">修改时间 新→旧</string>
+    <string name="sort_date_oldest">修改时间 旧→新</string>
+    <string name="sort_size_largest">大小 大→小</string>
+    <string name="sort_size_smallest">大小 小→大</string>
+    <string name="sort_type_group">按类型分组</string>
+    <string name="sort_folder_only">仅该文件夹</string>
+    <string name="sort_folder_only_hint">开启后仅对当前文件夹生效，其他文件夹使用默认排序</string>
+
+    <!-- Shizuku -->
+    <string name="shizuku_required">需要 Shizuku 权限才能访问此目录</string>
+    <string name="shizuku_granted">Shizuku 已授权</string>
+    <string name="shizuku_request">授权 Shizuku</string>
+    <string name="shizuku_not_running">请先启动 Shizuku，然后切回此应用</string>
+
+    <!-- 隐藏文件 -->
+    <string name="show_hidden_files">显示隐藏文件</string>
+    <string name="hide_hidden_files">隐藏隐藏文件</string>
+
+    <!-- 深色模式 -->
+    <string name="dark_mode_auto">深色模式：跟随系统</string>
+    <string name="dark_mode_on">深色模式：已开启</string>
+    <string name="dark_mode_off">深色模式：已关闭</string>
+
+    <!-- HTTP 服务器 -->
+    <string name="http_server">无线传输</string>
+    <string name="http_server_running">服务已启动，在浏览器中打开以下地址：</string>
+    <string name="http_server_hint">确保手机和电脑连接同一 WiFi 网络</string>
+    <string name="http_server_stop">停止服务</string>
+    <string name="http_start_failed">启动服务失败</string>
+
+    <!-- 阅读器 -->
+    <string name="reader_title">阅读器</string>
+    <string name="reader_chapters">目录</string>
+    <string name="reader_save_bookmark">保存书签</string>
+    <string name="reader_load_bookmark">加载书签</string>
+    <string name="reader_bookmark_saved">书签已保存</string>
+    <string name="reader_bookmark_loaded">已跳转到书签位置</string>
+    <string name="reader_bookmark_not_found">暂无书签记录</string>
+    <string name="reader_bookmarks">书签</string>
+    <string name="reader_settings">设置</string>
+    <string name="reader_font_size">字号: %1$d</string>
+    <string name="reader_line_spacing">行距: %1$s</string>
+    <string name="reader_font">字体</string>
+    <string name="reader_font_default">默认</string>
+    <string name="reader_font_import">导入</string>
+    <string name="reader_font_reset">恢复默认</string>
+    <string name="reader_no_content">暂无内容</string>
+    <string name="reader_prev_page">上一页</string>
+    <string name="reader_next_page">下一页</string>
+    <string name="reader_page_indicator">%1$d / %2$d</string>
+    <string name="reader_untitled_chapter">第 %1$d 章</string>
+    <string name="reader_next_chapter">继续阅读下一章</string>
+    <string name="reader_end_of_book">— 全书完 —</string>
+    <string name="reader_theme">阅读主题</string>
+    <string name="reader_margin">左右边距</string>
+    <string name="reader_margin_left">左边距</string>
+    <string name="reader_margin_right">右边距</string>
+    <string name="reader_word_replace">替换词</string>
+    <string name="reader_replace_original">原文</string>
+    <string name="reader_replace_new">替换为</string>
+    <string name="reader_re_segment">重新分段</string>
+    <string name="reader_re_segment_desc">智能分段，适合大段未分段的文本</string>
+    <string name="reader_tts">朗读</string>
+    <string name="tts_no_engine">未找到语音引擎，请安装 Google TTS 或其他 TTS 应用</string>
+    <string name="chinese_convert">繁简转换</string>
+    <string name="chinese_convert_off">关闭</string>
+    <string name="chinese_to_traditional">转为繁体</string>
+    <string name="chinese_to_simplified">转为简体</string>
+    <string name="action_off">关</string>
+    <string name="action_extract">解压</string>
+    <string name="action_extract_all">全部解压</string>
+    <string name="action_compress_zip">压缩为 ZIP</string>
+
+    <!-- 文件类型 -->
+    <string name="file_type_folder">文件夹</string>
+    <string name="file_type_txt">文本文件</string>
+    <string name="file_type_epub">EPUB 电子书</string>
+    <string name="file_type_pdf">PDF 文档</string>
+
+    <!-- 属性 -->
+    <string name="prop_name">名称</string>
+    <string name="prop_path">路径</string>
+    <string name="prop_size">大小</string>
+    <string name="prop_type">类型</string>
+    <string name="prop_modified">修改时间</string>
+
+    <!-- 权限 -->
+    <string name="permission_title">需要存储权限</string>
+    <string name="permission_description">Fold 需要访问设备存储来浏览和管理文件</string>
+    <string name="permission_grant">授权访问</string>
+    <string name="permission_retry">重新授权</string>
+    <string name="permission_open_settings">前往设置开启</string>
+    <string name="permission_app_settings">应用设置</string>
+
+</resources>

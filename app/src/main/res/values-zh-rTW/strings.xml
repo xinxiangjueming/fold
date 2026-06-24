@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Fold</string>
+
+    <!-- 通用 -->
+    <string name="action_back">返回</string>
+    <string name="action_close">關閉</string>
+    <string name="action_refresh">重新整理</string>
+    <string name="action_more">更多</string>
+    <string name="action_delete">刪除</string>
+    <string name="action_edit">編輯</string>
+    <string name="action_save">儲存</string>
+    <string name="action_update">更新</string>
+    <string name="action_cancel">取消</string>
+    <string name="action_up">返回上級</string>
+
+    <!-- 檔案瀏覽 -->
+    <string name="empty_folder">此資料夾為空</string>
+    <string name="sort_title">檔案排序</string>
+    <string name="sort_name_asc">名稱 A→Z</string>
+    <string name="sort_name_desc">名稱 Z→A</string>
+    <string name="sort_date_newest">修改時間 新→舊</string>
+    <string name="sort_date_oldest">修改時間 舊→新</string>
+    <string name="sort_size_largest">大小 大→小</string>
+    <string name="sort_size_smallest">大小 小→大</string>
+    <string name="sort_type_group">按類型分組</string>
+    <string name="sort_folder_only">僅該資料夾</string>
+    <string name="sort_folder_only_hint">開啟後僅對目前資料夾生效，其他資料夾使用預設排序</string>
+
+    <!-- Shizuku -->
+    <string name="shizuku_required">需要 Shizuku 權限才能存取此目錄</string>
+    <string name="shizuku_granted">Shizuku 已授權</string>
+    <string name="shizuku_request">授權 Shizuku</string>
+    <string name="shizuku_not_running">請先啟動 Shizuku，然後切回此應用</string>
+
+    <!-- 隱藏檔案 -->
+    <string name="show_hidden_files">顯示隱藏檔案</string>
+    <string name="hide_hidden_files">隱藏隱藏檔案</string>
+
+    <!-- 深色模式 -->
+    <string name="dark_mode_auto">深色模式：跟隨系統</string>
+    <string name="dark_mode_on">深色模式：已開啟</string>
+    <string name="dark_mode_off">深色模式：已關閉</string>
+
+    <!-- HTTP 伺服器 -->
+    <string name="http_server">無線傳輸</string>
+    <string name="http_server_running">服務已啟動，在瀏覽器中開啟以下位址：</string>
+    <string name="http_server_hint">確保手機和電腦連接同一 WiFi 網路</string>
+    <string name="http_server_stop">停止服務</string>
+    <string name="http_start_failed">啟動服務失敗</string>
+
+    <!-- 閱讀器 -->
+    <string name="reader_title">閱讀器</string>
+    <string name="reader_chapters">目錄</string>
+    <string name="reader_save_bookmark">儲存書籤</string>
+    <string name="reader_load_bookmark">載入書籤</string>
+    <string name="reader_settings">設定</string>
+    <string name="reader_font_size">字號: %1$d</string>
+    <string name="reader_line_spacing">行距: %1$s</string>
+    <string name="reader_font">字型</string>
+    <string name="reader_font_default">預設</string>
+    <string name="reader_font_import">匯入</string>
+    <string name="reader_font_reset">恢復預設</string>
+    <string name="reader_no_content">暫無內容</string>
+    <string name="reader_prev_page">上一頁</string>
+    <string name="reader_next_page">下一頁</string>
+    <string name="reader_page_indicator">%1$d / %2$d</string>
+    <string name="reader_untitled_chapter">第 %1$d 章</string>
+    <string name="reader_next_chapter">繼續閱讀下一章</string>
+    <string name="reader_end_of_book">— 全書完 —</string>
+    <string name="reader_theme">閱讀主題</string>
+    <string name="reader_margin">左右邊距</string>
+    <string name="reader_margin_left">左邊距</string>
+    <string name="reader_margin_right">右邊距</string>
+    <string name="reader_word_replace">替換詞</string>
+    <string name="reader_replace_original">原文</string>
+    <string name="reader_replace_new">替換為</string>
+    <string name="reader_re_segment">重新分段</string>
+    <string name="reader_re_segment_desc">智慧分段，適合大段未分段的文字</string>
+    <string name="reader_tts">朗讀</string>
+    <string name="tts_no_engine">未找到語音引擎，請安裝 Google TTS 或其他 TTS 應用</string>
+    <string name="chinese_convert">繁簡轉換</string>
+    <string name="chinese_convert_off">關閉</string>
+    <string name="chinese_to_traditional">轉為繁體</string>
+    <string name="chinese_to_simplified">轉為簡體</string>
+    <string name="action_off">關</string>
+    <string name="action_extract">解壓</string>
+    <string name="action_extract_all">全部解壓</string>
+    <string name="action_compress_zip">壓縮為 ZIP</string>
+
+    <!-- 檔案類型 -->
+    <string name="file_type_folder">資料夾</string>
+    <string name="file_type_txt">文字檔案</string>
+    <string name="file_type_epub">EPUB 電子書</string>
+    <string name="file_type_pdf">PDF 文件</string>
+
+    <!-- 權限 -->
+    <string name="permission_title">需要儲存權限</string>
+    <string name="permission_description">Fold 需要存取裝置儲存空間來瀏覽和管理檔案</string>
+    <string name="permission_grant">授權存取</string>
+    <string name="permission_retry">重新授權</string>
+    <string name="permission_open_settings">前往設定開啟</string>
+    <string name="permission_app_settings">應用設定</string>
+</resources>

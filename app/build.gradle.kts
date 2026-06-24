@@ -1,0 +1,109 @@
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.plugin.compose")
+}
+
+android {
+    namespace = "com.example.fold"
+    compileSdk = 37
+
+    defaultConfig {
+        applicationId = "com.example.fold"
+        minSdk = 26
+        targetSdk = 36
+        versionCode = 1
+        versionName = "1.0"
+
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+    }
+    buildFeatures {
+        compose = true
+        aidl = true
+    }
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("armeabi-v7a", "arm64-v8a")
+            isUniversalApk = false
+        }
+    }
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
+}
+
+dependencies {
+    // Core
+    implementation("androidx.core:core-ktx:1.18.0")
+    implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("com.google.android.material:material:1.12.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+    implementation("androidx.activity:activity-ktx:1.13.0")
+    implementation("androidx.activity:activity-compose:1.13.0")
+
+    // Compose BOM
+    implementation(platform("androidx.compose:compose-bom:2026.02.01"))
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-graphics")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
+
+    // Miuix
+    implementation("top.yukonga.miuix.kmp:miuix-ui:0.9.2")
+    implementation("top.yukonga.miuix.kmp:miuix-icons:0.9.2")
+    implementation("top.yukonga.miuix.kmp:miuix-blur:0.9.2")
+
+    // Navigation
+    implementation("androidx.navigation:navigation-compose:2.8.5")
+
+    // Lifecycle + ViewModel
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+
+    // Media (MediaSession + MediaStyle notifications)
+    implementation("androidx.media:media:1.7.0")
+
+    // Encoding detection
+    implementation("com.googlecode.juniversalchardet:juniversalchardet:1.0.3")
+
+    // Shizuku (ADB 权限访问 Android/data, Android/obb)
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
+
+    // Coroutines
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+
+    // Debug
+    debugImplementation("androidx.compose.ui:ui-tooling")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
+
+    // HTTP Server
+    implementation("org.nanohttpd:nanohttpd:2.3.1")
+
+    // Image loading (Coil for Compose)
+    implementation("io.coil-kt:coil-compose:2.7.0")
+
+    // Archive support (ZIP/7Z/TAR/GZ/RAR)
+    implementation("org.apache.commons:commons-compress:1.27.1")
+    // XZ for 7z LZMA support (bundled with commons-compress)
+    // RAR support uses commons-compress internal unrar
+}
