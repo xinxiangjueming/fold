@@ -9,6 +9,7 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import com.example.fold.MainActivity
 import com.example.fold.ui.filebrowser.FileBrowserScreen
 import com.example.fold.ui.calculator.CalculatorScreen
 import com.example.fold.ui.hidden.HiddenAppsScreen
