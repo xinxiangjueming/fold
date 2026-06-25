@@ -1,7 +1,9 @@
 package com.example.fold.ui.filebrowser
 
 import android.app.Application
+import android.content.ComponentName
 import android.content.Context
+import android.content.pm.PackageManager
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.fold.AppContainer
@@ -10,6 +12,7 @@ import com.example.fold.data.model.FileItem
 import com.example.fold.data.provider.LocalFileProvider
 import com.example.fold.util.FoldLogger
 import com.example.fold.util.ShizukuHelper
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -51,7 +54,10 @@ data class FileBrowserState(
     val shizukuAvailable: Boolean = false,
     val shizukuGranted: Boolean = false,
     val isRestrictedPath: Boolean = false,
-    val showHiddenFiles: Boolean = false
+    val showHiddenFiles: Boolean = false,
+    // 复制/移动剪贴板
+    val clipboardFile: FileItem? = null,
+    val clipboardMove: Boolean = false,  // true=移动, false=复制
 )
 
 private const val TAG = "FoldVM"
@@ -84,10 +90,46 @@ class FileBrowserViewModel : ViewModel() {
         FoldLogger.i(TAG, "toggleCalculatorMode: ${!newValue} -> $newValue")
         _calculatorMode.value = newValue
         prefs.edit().putBoolean("calculator_mode", newValue).apply()
+
+        // 切换桌面图标和名称
+        switchLauncherAlias(newValue)
+    }
+
+    private fun switchLauncherAlias(calcMode: Boolean) {
+        try {
+            val pm = AppContainer.appContext.packageManager
+            val pkg = AppContainer.appContext.packageName
+            val foldAlias = ComponentName(pkg, "$pkg.AliasFold")
+            val calcAlias = ComponentName(pkg, "$pkg.AliasCalc")
+
+            if (calcMode) {
+                // 先启用计算器入口，等 Launcher 刷新后再禁用 Fold 入口
+                pm.setComponentEnabledSetting(calcAlias,
+                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP)
+                viewModelScope.launch {
+                    kotlinx.coroutines.delay(500)
+                    pm.setComponentEnabledSetting(foldAlias,
+                        PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP)
+                }
+            } else {
+                pm.setComponentEnabledSetting(foldAlias,
+                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP)
+                viewModelScope.launch {
+                    kotlinx.coroutines.delay(500)
+                    pm.setComponentEnabledSetting(calcAlias,
+                        PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP)
+                }
+            }
+            FoldLogger.i(TAG, "switchLauncherAlias: calcMode=$calcMode, done")
+        } catch (e: Exception) {
+            FoldLogger.e(TAG, "switchLauncherAlias failed", e)
+        }
     }
 
     init {
         FoldLogger.i(TAG, "init: starting FileBrowserViewModel")
+        // 启动时同步桌面图标状态（防止异常中断导致不一致）
+        switchLauncherAlias(_calculatorMode.value)
         val globalMode = SortMode.fromPref(prefs.getString("global_sort", null))
         val showHidden = prefs.getBoolean("show_hidden", false)
         _state.update { it.copy(
@@ -321,6 +363,48 @@ class FileBrowserViewModel : ViewModel() {
                 _state.update { it.copy(error = "解压失败: ${result.exceptionOrNull()?.message}") }
             }
         }
+    }
+
+    fun copyFile(file: FileItem) {
+        FoldLogger.d(TAG, "copyFile: ${file.name}")
+        _state.update { it.copy(clipboardFile = file, clipboardMove = false) }
+    }
+
+    fun moveFile(file: FileItem) {
+        FoldLogger.d(TAG, "moveFile: ${file.name}")
+        _state.update { it.copy(clipboardFile = file, clipboardMove = true) }
+    }
+
+    fun pasteFile() {
+        val clip = _state.value.clipboardFile ?: return
+        val isMove = _state.value.clipboardMove
+        val destDir = File(_state.value.currentPath)
+        FoldLogger.i(TAG, "pasteFile: ${clip.name} → ${destDir.absolutePath}, move=$isMove")
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val src = File(clip.path)
+                val dest = File(destDir, clip.name)
+                if (src.absolutePath == dest.absolutePath) {
+                    _state.update { it.copy(clipboardFile = null, clipboardMove = false) }
+                    return@launch
+                }
+                if (isMove) {
+                    src.renameTo(dest)
+                } else {
+                    src.copyTo(dest, overwrite = false)
+                }
+                FoldLogger.i(TAG, "pasteFile: success")
+                withContext(Dispatchers.Main) { refresh() }
+            } catch (e: Exception) {
+                FoldLogger.e(TAG, "pasteFile: failed", e)
+                _state.update { it.copy(error = "操作失败: ${e.message}") }
+            }
+            _state.update { it.copy(clipboardFile = null, clipboardMove = false) }
+        }
+    }
+
+    fun clearClipboard() {
+        _state.update { it.copy(clipboardFile = null, clipboardMove = false) }
     }
 
     fun compressArchive(file: FileItem, format: String) {

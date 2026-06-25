@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">计算器</string>
+    <string name="app_name_fold">Fold</string>
 
     <!-- 通用 -->
     <string name="action_back">返回</string>
@@ -11,7 +12,23 @@
     <string name="delete_failed">删除失败: %1$s</string>
     <string name="permission_denied_hint">存储权限未授权，请前往设置开启「所有文件访问」权限</string>
     <string name="action_rename">重命名</string>
+    <string name="action_copy">复制</string>
+    <string name="action_move">移动</string>
     <string name="action_copy_path">复制路径</string>
+    <string name="action_paste_here">粘贴到此处</string>
+    <string name="action_move_here">移动到此处</string>
+
+    <!-- 播放器 -->
+    <string name="audio_player_title">音乐播放</string>
+    <string name="sleep_timer_title">睡眠定时</string>
+    <string name="sleep_timer_minutes">%1$d 分钟后停止</string>
+    <string name="sleep_timer_finish_song">播完当前歌曲再暂停</string>
+    <string name="sleep_timer_waiting">等待歌曲结束</string>
+    <string name="sleep_timer_cancel">取消定时</string>
+    <string name="equalizer_title">均衡器</string>
+    <string name="equalizer_off">关闭均衡器</string>
+    <string name="equalizer_not_available">设备不支持均衡器</string>
+    <string name="playlist_title">播放列表</string>
     <string name="action_share">分享</string>
     <string name="action_properties">属性</string>
     <string name="action_edit">编辑</string>
@@ -106,6 +123,26 @@
     <string name="compress_format_title">选择压缩格式</string>
     <string name="calculator_mode_on">开启计算器伪装</string>
     <string name="calculator_mode_off">关闭计算器伪装</string>
+
+    <!-- 隐藏应用 -->
+    <string name="hidden_apps">隐藏应用</string>
+    <string name="hidden_apps_title">隐藏应用</string>
+    <string name="hidden_apps_empty">暂无隐藏的应用</string>
+    <string name="hidden_apps_empty_hint">点击右下角 + 添加要隐藏的应用</string>
+    <string name="hidden_apps_add">添加</string>
+    <string name="hidden_app_launch">启动</string>
+    <string name="hidden_app_unhide">恢复显示</string>
+    <string name="hidden_app_action_hint">点击启动，或恢复到桌面显示</string>
+    <string name="hidden_app_launch_failed">启动失败</string>
+    <string name="hidden_app_launch_failed_hint">无法启动「%1$s」，可能已被卸载</string>
+    <string name="hidden_picker_title">选择要隐藏的应用</string>
+    <string name="hidden_picker_search">搜索应用…</string>
+    <string name="hidden_picker_empty">没有可隐藏的应用</string>
+    <string name="hidden_picker_confirm">隐藏 (%1$d)</string>
+    <string name="hidden_apps_no_method">需要 Root 或 Shizuku 权限</string>
+    <string name="hidden_apps_no_method_hint">隐藏应用图标需要 Root 权限或 Shizuku 授权\n请先获取 Root 或启动 Shizuku 并授权</string>
+    <string name="hidden_method_root">Root</string>
+    <string name="hidden_method_shizuku">Shizuku</string>
 
     <!-- 文件类型 -->
     <string name="file_type_folder">文件夹</string>

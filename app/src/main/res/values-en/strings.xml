@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Calculator</string>
+    <string name="app_name_fold">Fold</string>
 
     <!-- Common -->
     <string name="action_back">Back</string>
@@ -10,7 +11,23 @@
     <string name="action_delete">Delete</string>
     <string name="delete_failed">Delete failed: %1$s</string>
     <string name="action_rename">Rename</string>
+    <string name="action_copy">Copy</string>
+    <string name="action_move">Move</string>
     <string name="action_copy_path">Copy Path</string>
+    <string name="action_paste_here">Paste Here</string>
+    <string name="action_move_here">Move Here</string>
+
+    <!-- Player -->
+    <string name="audio_player_title">Music Player</string>
+    <string name="sleep_timer_title">Sleep Timer</string>
+    <string name="sleep_timer_minutes">Stop after %1$d min</string>
+    <string name="sleep_timer_finish_song">Finish current song first</string>
+    <string name="sleep_timer_waiting">Waiting for song</string>
+    <string name="sleep_timer_cancel">Cancel Timer</string>
+    <string name="equalizer_title">Equalizer</string>
+    <string name="equalizer_off">Equalizer Off</string>
+    <string name="equalizer_not_available">Equalizer not available</string>
+    <string name="playlist_title">Playlist</string>
     <string name="action_share">Share</string>
     <string name="action_properties">Properties</string>
     <string name="action_edit">Edit</string>
@@ -101,6 +118,26 @@
     <string name="action_compress_zip">Compress to ZIP</string>
     <string name="calculator_mode_on">Calculator disguise on</string>
     <string name="calculator_mode_off">Calculator disguise off</string>
+
+    <!-- Hidden Apps -->
+    <string name="hidden_apps">Hidden Apps</string>
+    <string name="hidden_apps_title">Hidden Apps</string>
+    <string name="hidden_apps_empty">No hidden apps</string>
+    <string name="hidden_apps_empty_hint">Tap + to add apps to hide</string>
+    <string name="hidden_apps_add">Add</string>
+    <string name="hidden_app_launch">Launch</string>
+    <string name="hidden_app_unhide">Unhide</string>
+    <string name="hidden_app_action_hint">Launch this app or restore it to the home screen</string>
+    <string name="hidden_app_launch_failed">Launch failed</string>
+    <string name="hidden_app_launch_failed_hint">Cannot launch "%1$s" — it may have been uninstalled</string>
+    <string name="hidden_picker_title">Select apps to hide</string>
+    <string name="hidden_picker_search">Search apps…</string>
+    <string name="hidden_picker_empty">No apps available to hide</string>
+    <string name="hidden_picker_confirm">Hide (%1$d)</string>
+    <string name="hidden_apps_no_method">Root or Shizuku required</string>
+    <string name="hidden_apps_no_method_hint">Hiding app icons requires Root or Shizuku.\nPlease obtain Root or start Shizuku and grant permission.</string>
+    <string name="hidden_method_root">Root</string>
+    <string name="hidden_method_shizuku">Shizuku</string>
 
     <!-- File Types -->
     <string name="file_type_folder">Folder</string>

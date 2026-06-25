@@ -4,6 +4,10 @@
 
     <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.blur" />
 
+    <!-- 查询所有已安装应用（隐藏应用功能需要） -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+
     <!-- Shizuku -->
     <uses-permission android:name="rikka.shizuku.permission.API_V3" />
 
@@ -74,14 +78,45 @@
             android:exported="true"
             android:configChanges="orientation|screenSize|keyboardHidden|uiMode|screenLayout|smallestScreenSize"
             android:theme="@style/Theme.Fold">
+        </activity>
+
+        <!-- Fold 模式入口（默认启用） -->
+        <activity-alias
+            android:name=".AliasFold"
+            android:targetActivity=".MainActivity"
+            android:icon="@mipmap/ic_fold"
+            android:roundIcon="@mipmap/ic_fold"
+            android:label="@string/app_name_fold"
+            android:enabled="true"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity>
+        </activity-alias>
+
+        <!-- 计算器伪装模式入口（默认禁用） -->
+        <activity-alias
+            android:name=".AliasCalc"
+            android:targetActivity=".MainActivity"
+            android:icon="@mipmap/ic_calc"
+            android:roundIcon="@mipmap/ic_calc"
+            android:label="@string/app_name"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
 
         <service
             android:name=".service.ReaderNotificationService"
+            android:foregroundServiceType="mediaPlayback"
+            android:exported="false" />
+
+        <service
+            android:name=".service.MusicNotificationService"
             android:foregroundServiceType="mediaPlayback"
             android:exported="false" />
     </application>

@@ -58,6 +58,9 @@ fun FileBrowserScreen(
     onFileClick: (String) -> Unit,
     onImageClick: (String) -> Unit,
     onArchiveClick: (String) -> Unit,
+    onVideoClick: (String) -> Unit = {},
+    onAudioClick: (String) -> Unit = {},
+    onNavigateToHiddenApps: () -> Unit = {},
     viewModel: FileBrowserViewModel = viewModel()
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -131,6 +134,21 @@ fun FileBrowserScreen(
                     }
                 },
                 actions = {
+                    // 粘贴按钮（剪贴板有内容时显示）
+                    state.clipboardFile?.let { clip ->
+                        val label = if (state.clipboardMove)
+                            stringResource(R.string.action_move_here)
+                        else
+                            stringResource(R.string.action_paste_here)
+                        TextButton(onClick = { viewModel.pasteFile() }) {
+                            Icon(Icons.Filled.ContentPaste, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(label, style = MaterialTheme.typography.labelMedium)
+                        }
+                        IconButton(onClick = { viewModel.clearClipboard() }) {
+                            Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(18.dp))
+                        }
+                    }
                     IconButton(onClick = { viewModel.toggleServer() }) {
                         Icon(
                             Icons.Filled.Cloud,
@@ -195,6 +213,14 @@ fun FileBrowserScreen(
                                     viewModel.toggleCalculatorMode()
                                 },
                                 leadingIcon = { Icon(Icons.Filled.Calculate, contentDescription = null) }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.hidden_apps)) },
+                                onClick = {
+                                    showMoreMenu = false
+                                    onNavigateToHiddenApps()
+                                },
+                                leadingIcon = { Icon(Icons.Filled.HideSource, contentDescription = null) }
                             )
                         }
                     }
@@ -276,9 +302,11 @@ fun FileBrowserScreen(
                             FoldLogger.d(TAG, "onFileClick: name=${file.name}, isDir=${file.isDirectory}")
                             when {
                                 file.isDirectory -> viewModel.onFileClick(file)
-                                file.isReadableFile -> onFileClick(file.path)
                                 file.extension.lowercase() in setOf("jpg","jpeg","png","gif","webp","bmp","svg") -> onImageClick(file.path)
+                                file.extension.lowercase() in setOf("mp4","mkv","avi","mov","flv","wmv","webm","3gp","ts") -> onVideoClick(file.path)
+                                file.extension.lowercase() in setOf("mp3","wav","flac","aac","ogg","wma","m4a","opus","ape") -> onAudioClick(file.path)
                                 com.example.fold.data.archive.ArchiveHelper.isArchive(file.name) -> onArchiveClick(file.path)
+                                file.isReadableFile -> onFileClick(file.path)
                                 file.extension.lowercase() == "apk" -> {
                                     try {
                                         val uri = androidx.core.content.FileProvider.getUriForFile(
@@ -501,6 +529,16 @@ fun FileBrowserScreen(
                             text = { Text(stringResource(R.string.action_rename)) },
                             onClick = { menuTargetFile = null; viewModel.renameFile(file) },
                             leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.action_copy)) },
+                            onClick = { menuTargetFile = null; viewModel.copyFile(file) },
+                            leadingIcon = { Icon(Icons.Filled.ContentCopy, contentDescription = null) }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.action_move)) },
+                            onClick = { menuTargetFile = null; viewModel.moveFile(file) },
+                            leadingIcon = { Icon(Icons.Filled.DriveFileMove, contentDescription = null) }
                         )
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.action_copy_path)) },
@@ -745,6 +783,8 @@ internal fun getFileIcon(file: FileItem) = when {
     file.extension == "txt" -> Icons.Filled.Description
     file.extension == "epub" -> Icons.AutoMirrored.Filled.MenuBook
     file.extension == "pdf" -> Icons.Filled.PictureAsPdf
+    file.extension.lowercase() in setOf("mp4","mkv","avi","mov","flv","wmv","webm","3gp","ts") -> Icons.Filled.PlayCircle
+    file.extension.lowercase() in setOf("mp3","wav","flac","aac","ogg","wma","m4a","opus","ape") -> Icons.Filled.MusicNote
     else -> Icons.AutoMirrored.Filled.InsertDriveFile
 }
 
@@ -753,6 +793,8 @@ internal fun getFileIconTint(file: FileItem) = when {
     file.extension == "txt" -> FileTypeTxt
     file.extension == "epub" -> FileTypeEpub
     file.extension == "pdf" -> FileTypePdf
+    file.extension.lowercase() in setOf("mp4","mkv","avi","mov","flv","wmv","webm","3gp","ts") -> FileTypeVideo
+    file.extension.lowercase() in setOf("mp3","wav","flac","aac","ogg","wma","m4a","opus","ape") -> FileTypeAudio
     else -> MiuixTextSecondary
 }
 
@@ -761,6 +803,8 @@ private fun getFileIconBackground(file: FileItem) = when {
     file.extension == "txt" -> FileTypeTxt.copy(alpha = 0.12f)
     file.extension == "epub" -> FileTypeEpub.copy(alpha = 0.12f)
     file.extension == "pdf" -> FileTypePdf.copy(alpha = 0.12f)
+    file.extension.lowercase() in setOf("mp4","mkv","avi","mov","flv","wmv","webm","3gp","ts") -> FileTypeVideo.copy(alpha = 0.12f)
+    file.extension.lowercase() in setOf("mp3","wav","flac","aac","ogg","wma","m4a","opus","ape") -> FileTypeAudio.copy(alpha = 0.12f)
     else -> MiuixSurfaceVariant
 }
 

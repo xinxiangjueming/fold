@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">計算機</string>
+    <string name="app_name_fold">Fold</string>
 
     <!-- 通用 -->
     <string name="action_back">返回</string>
@@ -90,11 +91,43 @@
     <string name="calculator_mode_on">開啟計算機偽裝</string>
     <string name="calculator_mode_off">關閉計算機偽裝</string>
 
+    <!-- 隱藏應用 -->
+    <string name="hidden_apps">隱藏應用</string>
+    <string name="hidden_apps_title">隱藏應用</string>
+    <string name="hidden_apps_empty">暫無隱藏的應用</string>
+    <string name="hidden_apps_empty_hint">點擊右下角 + 新增要隱藏的應用</string>
+    <string name="hidden_apps_add">新增</string>
+    <string name="hidden_app_launch">啟動</string>
+    <string name="hidden_app_unhide">恢復顯示</string>
+    <string name="hidden_app_action_hint">點擊啟動，或恢復到桌面顯示</string>
+    <string name="hidden_app_launch_failed">啟動失敗</string>
+    <string name="hidden_app_launch_failed_hint">無法啟動「%1$s」，可能已被解除安裝</string>
+    <string name="hidden_picker_title">選擇要隱藏的應用</string>
+    <string name="hidden_picker_search">搜尋應用…</string>
+    <string name="hidden_picker_empty">沒有可隱藏的應用</string>
+    <string name="hidden_picker_confirm">隱藏 (%1$d)</string>
+    <string name="hidden_apps_no_method">需要 Root 或 Shizuku 權限</string>
+    <string name="hidden_apps_no_method_hint">隱藏應用圖示需要 Root 權限或 Shizuku 授權\n請先獲取 Root 或啟動 Shizuku 並授權</string>
+    <string name="hidden_method_root">Root</string>
+    <string name="hidden_method_shizuku">Shizuku</string>
+
     <!-- 檔案類型 -->
     <string name="file_type_folder">資料夾</string>
     <string name="file_type_txt">文字檔案</string>
     <string name="file_type_epub">EPUB 電子書</string>
     <string name="file_type_pdf">PDF 文件</string>
+
+    <!-- 播放器 -->
+    <string name="audio_player_title">音樂播放</string>
+    <string name="sleep_timer_title">睡眠定時</string>
+    <string name="sleep_timer_minutes">%1$d 分鐘後停止</string>
+    <string name="sleep_timer_finish_song">播完當前歌曲再暫停</string>
+    <string name="sleep_timer_waiting">等待歌曲結束</string>
+    <string name="sleep_timer_cancel">取消定時</string>
+    <string name="equalizer_title">均衡器</string>
+    <string name="equalizer_off">關閉均衡器</string>
+    <string name="equalizer_not_available">裝置不支援均衡器</string>
+    <string name="playlist_title">播放列表</string>
 
     <!-- 權限 -->
     <string name="permission_title">需要儲存權限</string>

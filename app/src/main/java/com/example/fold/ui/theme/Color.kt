@@ -33,6 +33,8 @@ val FileTypeFolder = Color(0xFFFFB800)
 val FileTypeTxt = Color(0xFF34C759)
 val FileTypeEpub = Color(0xFFAF52DE)
 val FileTypePdf = Color(0xFFFF3B30)
+val FileTypeVideo = Color(0xFFFF2D55)
+val FileTypeAudio = Color(0xFF5856D6)
 val FileTypeFtp = Color(0xFF007AFF)
 
 val MiuixSurfaceVariant = Color(0xFFE8E8E8)

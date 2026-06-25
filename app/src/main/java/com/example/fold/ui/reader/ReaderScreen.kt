@@ -410,6 +410,7 @@ private fun TxtReaderContent(
 
     var swipeStartX by remember { mutableStateOf(0f) }
     var swipeStartY by remember { mutableStateOf(0f) }
+    val swipeTag = "ReaderSwipe"
 
     Column(modifier = Modifier
         .fillMaxSize()
@@ -424,6 +425,7 @@ private fun TxtReaderContent(
                     val down = awaitFirstDown(requireUnconsumed = false)
                     swipeStartX = down.position.x
                     swipeStartY = down.position.y
+                    FoldLogger.d(swipeTag, "DOWN at (${swipeStartX.toInt()}, ${swipeStartY.toInt()}), startIdx=$startIdx, chapters=${chapters.size}")
                     val up = withTimeoutOrNull(500) {
                         var event = awaitPointerEvent()
                         while (event.changes.any { it.pressed }) {
@@ -436,17 +438,30 @@ private fun TxtReaderContent(
                         val endY = up.changes.firstOrNull()?.position?.y ?: swipeStartY
                         val dx = endX - swipeStartX
                         val dy = endY - swipeStartY
-                        if (kotlin.math.abs(dx) > 150 && kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.5) {
+                        val absDx = kotlin.math.abs(dx)
+                        val absDy = kotlin.math.abs(dy)
+                        val horizontalPass = absDx > 150
+                        val dominant = absDx > absDy * 1.5
+                        FoldLogger.d(swipeTag, "UP at (${endX.toInt()}, ${endY.toInt()}), dx=${dx.toInt()}, dy=${dy.toInt()}, absDx=${absDx.toInt()}, absDy=${absDy.toInt()}, hPass=$horizontalPass, dominant=$dominant, timeout=false")
+                        if (horizontalPass && dominant) {
                             if (dx < 0 && startIdx + loadedCount.intValue < chapters.size) {
                                 val nextIdx = (startIdx + loadedCount.intValue).coerceAtMost(chapters.size - 1)
+                                FoldLogger.d(swipeTag, "LEFT swipe → next chapter $nextIdx")
                                 loadedCount.intValue = 1
                                 viewModel.updateTxtChapter(nextIdx)
                             } else if (dx > 0 && startIdx > 0) {
                                 val prevIdx = (startIdx - 1).coerceAtLeast(0)
+                                FoldLogger.d(swipeTag, "RIGHT swipe → prev chapter $prevIdx")
                                 loadedCount.intValue = 1
                                 viewModel.updateTxtChapter(prevIdx)
+                            } else {
+                                FoldLogger.d(swipeTag, "Swipe IGNORED: dx=${dx.toInt()}, startIdx=$startIdx, loadedCount=${loadedCount.intValue}, chapters=${chapters.size}")
                             }
+                        } else {
+                            FoldLogger.d(swipeTag, "Swipe REJECTED: horizontalPass=$horizontalPass, dominant=$dominant")
                         }
+                    } else {
+                        FoldLogger.d(swipeTag, "TIMEOUT 500ms — 手势超时，未识别为滑动")
                     }
                 }
             }
@@ -565,30 +580,33 @@ private fun EpubReaderContent(
     val isLoadingMore = remember { mutableStateOf(false) }
     val isChapterLoading = remember { mutableStateOf(false) }
     val pendingChapter = remember { mutableIntStateOf(-1) }
+    val swipeLoading = remember { mutableStateOf(false) } // 防止连续滑动重复触发
 
     // 加载当前章节
     LaunchedEffect(state.currentChapterIndex) {
-        FoldLogger.d("Reader", "chapterSwitch: index=${state.currentChapterIndex}, oldHtml=${loadedHtml.value.length}")
+        FoldLogger.d("Reader", "chapterSwitch: index=${state.currentChapterIndex}, pending=${pendingChapter.intValue}, loadedHtml=${loadedHtml.value.length}")
         loadedCount.intValue = 1
         isChapterLoading.value = true
         if (pendingChapter.intValue == -1) loadedHtml.value = ""
         viewModel.loadEpubChapter(state.currentChapterIndex)
     }
 
-    // 当 epubHtml 更新时，追加到 loadedHtml
+    // 当 epubHtml 更新时，写入 loadedHtml（Pair 的 Long 保证每次都触发）
     LaunchedEffect(epubHtml) {
-        if (epubHtml.isNotEmpty()) {
-            FoldLogger.d("Reader", "epubHtml updated: len=${epubHtml.length}, loadedHtml=${loadedHtml.value.length}")
+        val (html, _) = epubHtml
+        if (html.isNotEmpty()) {
+            FoldLogger.d("Reader", "epubHtml updated: len=${html.length}, pending=${pendingChapter.intValue}, loadedHtml=${loadedHtml.value.length}")
             if (pendingChapter.intValue >= 0 || loadedHtml.value.isEmpty()) {
-                loadedHtml.value = epubHtml
+                loadedHtml.value = html
             } else {
-                // 追加新章节内容
                 val separator = "<hr style='margin:32px 0;border:none;border-top:1px solid #ccc;'>"
-                loadedHtml.value = loadedHtml.value + separator + epubHtml
+                loadedHtml.value = loadedHtml.value + separator + html
             }
             pendingChapter.intValue = -1
             isChapterLoading.value = false
             isLoadingMore.value = false
+            swipeLoading.value = false
+            FoldLogger.d("Reader", "epubHtml applied: loadedHtml=${loadedHtml.value.length}, swipeLoading reset")
         }
     }
 
@@ -635,8 +653,9 @@ private fun EpubReaderContent(
                     @android.webkit.JavascriptInterface
                     fun loadMore() {
                         post {
-                            val endIdx = state.currentChapterIndex + loadedCount.intValue
-                            if (!isLoadingMore.value && endIdx < chapters.size) {
+                            val endIdx = viewModel.state.value.currentChapterIndex + loadedCount.intValue
+                            val chaps = viewModel.getChapters()
+                            if (!isLoadingMore.value && endIdx < chaps.size) {
                                 isLoadingMore.value = true
                                 loadedCount.intValue++
                                 viewModel.loadEpubChapter(endIdx)
@@ -646,21 +665,36 @@ private fun EpubReaderContent(
                     @android.webkit.JavascriptInterface
                     fun onSwipe(direction: String) {
                         post {
-                            val cur = state.currentChapterIndex
+                            if (swipeLoading.value) {
+                                FoldLogger.d("ReaderSwipe", "EPUB swipe IGNORED: already loading")
+                                return@post
+                            }
+                            val cur = viewModel.state.value.currentChapterIndex
+                            val chaps = viewModel.getChapters()
+                            FoldLogger.d("ReaderSwipe", "EPUB onSwipe: direction=$direction, cur=$cur, loadedCount=${loadedCount.intValue}, chapters=${chaps.size}")
                             when (direction) {
                                 "left" -> {
                                     val next = cur + loadedCount.intValue
-                                    if (next < chapters.size) {
+                                    if (next < chaps.size) {
+                                        FoldLogger.d("ReaderSwipe", "EPUB LEFT → chapter $next, calling loadEpubChapter now")
                                         pendingChapter.intValue = next
                                         loadedCount.intValue = 1
+                                        swipeLoading.value = true
                                         viewModel.loadEpubChapter(next)
+                                        FoldLogger.d("ReaderSwipe", "EPUB LEFT: loadEpubChapter($next) returned from call")
+                                    } else {
+                                        FoldLogger.d("ReaderSwipe", "EPUB LEFT IGNORED: next=$next >= chapters=${chaps.size}")
                                     }
                                 }
                                 "right" -> {
                                     if (cur > 0) {
+                                        FoldLogger.d("ReaderSwipe", "EPUB RIGHT → chapter ${cur - 1}")
                                         pendingChapter.intValue = cur - 1
                                         loadedCount.intValue = 1
+                                        swipeLoading.value = true
                                         viewModel.loadEpubChapter(cur - 1)
+                                    } else {
+                                        FoldLogger.d("ReaderSwipe", "EPUB RIGHT IGNORED: cur=$cur")
                                     }
                                 }
                             }
@@ -669,6 +703,12 @@ private fun EpubReaderContent(
                 }, "Android")
 
                 // 页面加载完成后注入滚动检测
+                webChromeClient = object : android.webkit.WebChromeClient() {
+                    override fun onConsoleMessage(cm: android.webkit.ConsoleMessage?): Boolean {
+                        cm?.let { FoldLogger.d("ReaderSwipe", "JS: ${it.message()}") }
+                        return true
+                    }
+                }
                 webViewClient = object : android.webkit.WebViewClient() {
                     override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
                         super.onPageFinished(view, url)
@@ -710,17 +750,25 @@ private const val SCROLL_DETECT_JS = """
         }
     }, {passive: true});
 
-    // 滑动检测：左右滑动切换章节
-    var startX = 0, startY = 0;
+    // 滑动检测：左右滑动切换章节（带冷却防抖）
+    var startX = 0, startY = 0, swipeCooldown = false;
     document.addEventListener('touchstart', function(e) {
         startX = e.touches[0].clientX;
         startY = e.touches[0].clientY;
     }, {passive: true});
     document.addEventListener('touchend', function(e) {
+        if (swipeCooldown) return;
         var dx = e.changedTouches[0].clientX - startX;
         var dy = e.changedTouches[0].clientY - startY;
-        if (Math.abs(dx) > 80 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+        var absDx = Math.abs(dx);
+        var absDy = Math.abs(dy);
+        var hPass = absDx > 80;
+        var dominant = absDx > absDy * 1.5;
+        console.log('ReaderSwipe JS: dx=' + dx.toFixed(1) + ', dy=' + dy.toFixed(1) + ', hPass=' + hPass + ', dominant=' + dominant);
+        if (hPass && dominant) {
+            swipeCooldown = true;
             Android.onSwipe(dx < 0 ? 'left' : 'right');
+            setTimeout(function() { swipeCooldown = false; }, 800);
         }
     }, {passive: true});
 })();

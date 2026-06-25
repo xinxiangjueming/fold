@@ -34,8 +34,8 @@ object ShizukuHelper {
     val granted: StateFlow<Boolean> = _granted
 
     private var shellService: IShellService? = null
-    var serviceBound = false
-        private set
+    private val _serviceBound = MutableStateFlow(false)
+    val serviceBound: StateFlow<Boolean> = _serviceBound
 
     // 服务就绪回调
     var onServiceReady: (() -> Unit)? = null
@@ -50,14 +50,14 @@ object ShizukuHelper {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             Log.d(TAG, "ShellService connected")
             shellService = IShellService.Stub.asInterface(binder)
-            serviceBound = true
+            _serviceBound.value = true
             onServiceReady?.invoke()
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
             Log.w(TAG, "ShellService disconnected")
             shellService = null
-            serviceBound = false
+            _serviceBound.value = false
         }
     }
 
@@ -105,7 +105,7 @@ object ShizukuHelper {
     fun recheck() {
         try {
             val alive = Shizuku.pingBinder()
-            Log.d(TAG, "recheck: pingBinder=$alive, available=${_available.value}, granted=${_granted.value}, serviceBound=$serviceBound")
+            Log.d(TAG, "recheck: pingBinder=$alive, available=${_available.value}, granted=${_granted.value}, serviceBound=${_serviceBound.value}")
             if (alive) {
                 if (!_available.value) _available.value = true
                 checkAndBind()
@@ -125,7 +125,7 @@ object ShizukuHelper {
             Log.d(TAG, "checkSelfPermission=$result (0=GRANTED, -1=DENIED)")
             val isGranted = result == PackageManager.PERMISSION_GRANTED
             _granted.value = isGranted
-            if (isGranted && !serviceBound) {
+            if (isGranted && !_serviceBound.value) {
                 Log.d(TAG, "Permission granted, binding ShellService...")
                 bindService()
             }
@@ -147,7 +147,7 @@ object ShizukuHelper {
             Log.d(TAG, "requestPermission: pre-check=$result")
             if (result == PackageManager.PERMISSION_GRANTED) {
                 _granted.value = true
-                if (!serviceBound) bindService()
+                if (!_serviceBound.value) bindService()
                 return
             }
             Log.d(TAG, "requestPermission: requesting...")
@@ -178,7 +178,7 @@ object ShizukuHelper {
     suspend fun exec(command: String): Result<String> = withContext(Dispatchers.IO) {
         val svc = shellService
         if (svc == null) {
-            Log.e(TAG, "exec: service null, bound=$serviceBound")
+            Log.e(TAG, "exec: service null, bound=${_serviceBound.value}")
             return@withContext Result.failure(Exception("Shizuku 服务未连接"))
         }
         try {
@@ -303,7 +303,7 @@ object ShizukuHelper {
         _available.value = false
         _granted.value = false
         shellService = null
-        serviceBound = false
+        _serviceBound.value = false
     }
 
     private val permissionResultListener =
@@ -311,7 +311,7 @@ object ShizukuHelper {
             val granted = result == PackageManager.PERMISSION_GRANTED
             Log.d(TAG, "*** Permission result: code=$code, granted=$granted ***")
             _granted.value = granted
-            if (granted && !serviceBound) bindService()
+            if (granted && !_serviceBound.value) bindService()
         }
 }
 

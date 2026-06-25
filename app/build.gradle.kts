@@ -67,6 +67,11 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
 
+    // Media (视频 + 音频播放)
+    implementation("androidx.media3:media3-exoplayer:1.5.1")
+    implementation("androidx.media3:media3-ui:1.5.1")
+    implementation("androidx.media3:media3-session:1.5.1")
+
     // Miuix
     implementation("top.yukonga.miuix.kmp:miuix-ui:0.9.2")
     implementation("top.yukonga.miuix.kmp:miuix-icons:0.9.2")

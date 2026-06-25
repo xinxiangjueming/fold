@@ -46,8 +46,8 @@ class ReaderViewModel : ViewModel() {
     private val _state = MutableStateFlow(ReaderState())
     val state: StateFlow<ReaderState> = _state.asStateFlow()
 
-    private val _epubHtml = MutableStateFlow("")
-    val epubHtml: StateFlow<String> = _epubHtml.asStateFlow()
+    private val _epubHtml = MutableStateFlow("" to 0L)
+    val epubHtml: StateFlow<Pair<String, Long>> = _epubHtml.asStateFlow()
 
     private val _pdfPageBitmap = MutableStateFlow<Bitmap?>(null)
     val pdfPageBitmap: StateFlow<Bitmap?> = _pdfPageBitmap.asStateFlow()
@@ -247,19 +247,22 @@ class ReaderViewModel : ViewModel() {
     }
 
     fun loadEpubChapter(index: Int) {
-        FoldLogger.i(TAG, "loadEpubChapter: index=$index")
+        FoldLogger.i(TAG, "loadEpubChapter: index=$index, launching coroutine")
         viewModelScope.launch {
             try {
+                val t0 = System.currentTimeMillis()
                 epubReader.updateChapterIndex(index)
+                FoldLogger.d(TAG, "loadEpubChapter: updateChapterIndex done in ${System.currentTimeMillis()-t0}ms")
+                val t1 = System.currentTimeMillis()
                 val html = epubReader.getChapterHtml(index)
-                FoldLogger.i(TAG, "loadEpubChapter: got html, len=${html.length}, index=$index")
-                _epubHtml.value = html
+                FoldLogger.i(TAG, "loadEpubChapter: getChapterHtml len=${html.length} in ${System.currentTimeMillis()-t1}ms")
+                _epubHtml.value = html to System.nanoTime()
                 _state.update { it.copy(currentChapterIndex = index) }
                 saveProgress(index)
-                FoldLogger.d(TAG, "loadEpubChapter: done, htmlLen=${_epubHtml.value.length}")
+                FoldLogger.d(TAG, "loadEpubChapter: DONE total=${System.currentTimeMillis()-t0}ms, index=$index")
             } catch (e: Exception) {
                 FoldLogger.e(TAG, "loadEpubChapter: FAILED index=$index", e)
-                _epubHtml.value = ""
+                _epubHtml.value = "" to 0L
             }
         }
     }

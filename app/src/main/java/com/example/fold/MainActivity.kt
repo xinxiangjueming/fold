@@ -1,5 +1,6 @@
 package com.example.fold
 
+import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
@@ -18,6 +19,12 @@ import com.example.fold.util.ShizukuHelper
 private const val TAG = "FoldMain"
 
 class MainActivity : AppCompatActivity() {
+
+    companion object {
+        /** 通知栏点击后，等待 NavGraph 就绪后跳转到播放页 */
+        @Volatile
+        var pendingOpenPlayer = false
+    }
 
     private fun isNightMode(): Boolean {
         return (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
@@ -47,6 +54,20 @@ class MainActivity : AppCompatActivity() {
         }
         val t3 = SystemClock.elapsedRealtime()
         FoldLogger.i(TAG, "onCreate: setContent=${t3-t2}ms, total=${t3-t0}ms")
+
+        // 通知栏点击 → 打开播放页
+        if (intent?.getBooleanExtra("OPEN_PLAYER", false) == true) {
+            pendingOpenPlayer = true
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra("OPEN_PLAYER", false)) {
+            FoldLogger.i(TAG, "onNewIntent: OPEN_PLAYER")
+            pendingOpenPlayer = true
+        }
     }
 
     override fun onResume() {
