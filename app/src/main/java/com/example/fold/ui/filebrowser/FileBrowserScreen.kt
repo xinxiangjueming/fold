@@ -241,8 +241,8 @@ fun FileBrowserScreen(
                 )
             )
 
-            // Shizuku 权限提示（受限目录且未授权）
-            if (state.isRestrictedPath && !state.shizukuGranted) {
+            // Shizuku 权限提示（受限目录且未授权，且 root 不可用）
+            if (state.isRestrictedPath && !state.shizukuGranted && !state.rootAvailable) {
                 Card(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
@@ -570,13 +570,11 @@ fun FileBrowserScreen(
                                 leadingIcon = { Icon(Icons.Filled.FolderZip, contentDescription = null) }
                             )
                         }
-                        if (file.isDirectory) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.action_compress)) },
-                                onClick = { menuTargetFile = null; compressTargetFile = file },
-                                leadingIcon = { Icon(Icons.Filled.Archive, contentDescription = null) }
-                            )
-                        }
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.action_compress)) },
+                            onClick = { menuTargetFile = null; compressTargetFile = file },
+                            leadingIcon = { Icon(Icons.Filled.Archive, contentDescription = null) }
+                        )
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.action_properties)) },
                             onClick = { menuTargetFile = null; viewModel.showProperties(file) },

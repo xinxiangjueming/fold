@@ -167,7 +167,7 @@ class ReaderViewModel : ViewModel() {
 
         readerJob = viewModelScope.launch {
             when (ext) {
-                "txt" -> {
+                "txt", "log", "md", "json", "xml", "csv" -> {
                     txtReader.open(filePath)
                     txtReader.state.collect { readerState ->
                         val cur = _state.value

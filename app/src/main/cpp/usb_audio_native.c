@@ -16,6 +16,7 @@
 #include <pthread.h>
 #include <sched.h>
 #include <time.h>
+#include <unistd.h>
 #include <android/log.h>
 #include <libusb.h>
 
@@ -97,6 +98,7 @@ static void file_log_close(void) {
 /* ── UAC2 控制请求常量（来自 Linux 内核 usb/audio-v2.h） ── */
 #define UAC2_CS_CUR                0x01
 #define UAC2_CS_CONTROL_SAM_FREQ   0x01
+#define UAC2_CS_CONTROL_CLOCK_VALID 0x02
 #define UAC2_CLOCK_SOURCE          0x0A
 
 /* ── Isochronous 传输参数 ── */
@@ -294,6 +296,40 @@ static int send_sample_rate_cur(int sample_rate) {
     return 0;
 }
 
+/*
+ * 验证 UAC2 时钟源是否有效（已锁定）
+ * 等价于 Linux 内核 clock.c uac_clock_source_is_valid()
+ * 读取 UAC2_CS_CONTROL_CLOCK_VALID (0x0200) 寄存器
+ */
+static int verify_clock_valid(void) {
+    if (!g_state.handle || g_state.clock_source_id <= 0) {
+        LOGW("Cannot verify clock: no handle or clock_source_id");
+        return 0;
+    }
+
+    uint8_t data = 0;
+    uint16_t wIndex = g_state.clock_interface | (g_state.clock_source_id << 8);
+
+    int ret = libusb_control_transfer(
+        g_state.handle,
+        LIBUSB_REQUEST_TYPE_CLASS | LIBUSB_RECIPIENT_INTERFACE | LIBUSB_ENDPOINT_IN,
+        UAC2_CS_CUR,
+        UAC2_CS_CONTROL_CLOCK_VALID << 8,
+        wIndex,
+        &data,
+        sizeof(data),
+        1000
+    );
+
+    if (ret < 0) {
+        LOGW("GET_CUR clock valid failed: %s (ret=%d)", libusb_error_name(ret), ret);
+        return 0;
+    }
+
+    LOGI("Clock validity: %s (raw=0x%02X)", data ? "VALID" : "INVALID", data);
+    return data;
+}
+
 /* ── Isochronous 回调 ── */
 
 static void LIBUSB_CALL iso_callback(struct libusb_transfer *transfer) {
@@ -322,29 +358,30 @@ static void LIBUSB_CALL iso_callback(struct libusb_transfer *transfer) {
             }
 
             /*
-             * 自适应预填充检查：
-             * - 播放初期：等待 buffer 积累足够数据，避免 underrun
-             * - 运行中：如果连续 underrun，增加预填充阈值（最大 200ms）
-             * - 如果稳定运行，逐步降低阈值（最小 20ms）
+             * 直接从 ring buffer 读取数据。
+             * ring_read() 在数据不足时自动填零，不需要额外的预填充检查。
+             * 这避免了 "avail < prebuffer → 发静音 → 永远无法开始播放" 的问题。
+             * prebuffer_bytes 仅用于下次播放启动时的初始延迟判断。
              */
+            int actual = ring_read(buf, total_size);
+
+            /* 记录最低水位 */
             pthread_mutex_lock(&g_state.ring_mutex);
             int avail = g_state.ring_available;
             pthread_mutex_unlock(&g_state.ring_mutex);
-
-            /* 记录最低水位 */
             if (avail < g_state.ring_watermark) {
                 g_state.ring_watermark = avail;
             }
 
-            if (avail < g_state.prebuffer_bytes) {
-                /* 数据不足，发送静音等待 buffer 填充 */
-                memset(buf, 0, total_size);
+            if (actual < total_size) {
+                /* 数据不足 = underrun */
+                g_state.underrun_count++;
                 g_state.consecutive_underruns++;
                 g_state.consecutive_ok = 0;
 
-                /* 连续 underrun 时增加预填充阈值 */
-                if (g_state.consecutive_underruns >= 3) {
-                    int max_prebuf = g_state.sample_rate * g_state.frame_size / 5; /* 200ms */
+                /* 连续 underrun 时增加预填充阈值（下次播放用） */
+                if (g_state.consecutive_underruns >= 5) {
+                    int max_prebuf = g_state.sample_rate * g_state.frame_size / 5;
                     g_state.prebuffer_bytes = (g_state.prebuffer_bytes * 3 / 2 < max_prebuf)
                         ? g_state.prebuffer_bytes * 3 / 2 : max_prebuf;
                     LOGW("Adaptive buffer: increased prebuffer to %d bytes (%d ms), "
@@ -355,26 +392,19 @@ static void LIBUSB_CALL iso_callback(struct libusb_transfer *transfer) {
                     g_state.consecutive_underruns = 0;
                 }
             } else {
-                /* 数据充足，正常读取 */
-                int actual = ring_read(buf, total_size);
-                if (actual < total_size) {
-                    g_state.consecutive_underruns++;
-                    g_state.consecutive_ok = 0;
-                } else {
-                    g_state.consecutive_underruns = 0;
-                    g_state.consecutive_ok++;
+                g_state.consecutive_underruns = 0;
+                g_state.consecutive_ok++;
 
-                    /* 稳定运行 500 次后，逐步降低预填充阈值 */
-                    if (g_state.consecutive_ok >= 500) {
-                        int min_prebuf = g_state.sample_rate * g_state.frame_size / 50; /* 20ms */
-                        if (g_state.prebuffer_bytes > min_prebuf) {
-                            g_state.prebuffer_bytes = g_state.prebuffer_bytes * 9 / 10;
-                            LOGI("Adaptive buffer: decreased prebuffer to %d bytes (%d ms)",
-                                 g_state.prebuffer_bytes,
-                                 g_state.prebuffer_bytes * 1000 / (g_state.sample_rate * g_state.frame_size));
-                        }
-                        g_state.consecutive_ok = 0;
+                /* 稳定运行后，逐步降低预填充阈值（下次播放用） */
+                if (g_state.consecutive_ok >= 500) {
+                    int min_prebuf = g_state.sample_rate * g_state.frame_size / 50;
+                    if (g_state.prebuffer_bytes > min_prebuf) {
+                        g_state.prebuffer_bytes = g_state.prebuffer_bytes * 9 / 10;
+                        LOGI("Adaptive buffer: decreased prebuffer to %d bytes (%d ms)",
+                             g_state.prebuffer_bytes,
+                             g_state.prebuffer_bytes * 1000 / (g_state.sample_rate * g_state.frame_size));
                     }
+                    g_state.consecutive_ok = 0;
                 }
             }
 
@@ -961,15 +991,51 @@ next_fb:
         }
     }
 
-    /* 从 AudioControl 接口的 clock source 实体提取时钟源 ID
-     * UAC2 的 clock source 定义在 AC 接口（bInterfaceSubClass=0x01），
-     * 不在 AS 接口。旧代码只搜 AS 接口导致 clock_source_id=0，SET_CUR 不发送，
-     * 设备不知道采样率 → 输出噪声 */
+    /* 从 AudioControl 接口通过 Terminal bCSourceID 查找时钟源
+     * 参考 Linux 内核 sound/usb/stream.c snd_usb_get_audioformat_uac12()
+     * 正确做法：通过 AS 接口的 bTerminalLink → Terminal 的 bCSourceID 获取
+     * 而不是直接搜索 CLOCK_SOURCE 实体（可能有多个 clock source 通过 Selector 连接） */
     if (g_state.clock_source_id == 0) {
+        /* 优先：通过 Terminal bCSourceID 间接获取 */
         for (int i = 0; i < config->bNumInterfaces; i++) {
             const struct libusb_interface *iface = &config->interface[i];
-            if (iface->num_altsetting == 0) continue;
-            /* 搜索所有接口的 alt setting 0（主描述符） */
+            for (int a = 0; a < iface->num_altsetting; a++) {
+                const uint8_t *extra = iface->altsetting[a].extra;
+                int extra_len = iface->altsetting[a].extra_length;
+                int apos = 0;
+                while (apos + 2 < extra_len) {
+                    uint8_t bLen = extra[apos];
+                    if (bLen < 3 || apos + bLen > extra_len) break;
+                    uint8_t bDescType = extra[apos + 1];
+                    uint8_t bSubtype = extra[apos + 2];
+
+                    /* 查找 Input Terminal (0x02) 或 Output Terminal (0x03)
+                     * bOffset 3 = bTerminalID, bOffset 7 = bCSourceID (UAC1/UAC2 通用) */
+                    if (bDescType == 0x24 &&
+                        (bSubtype == 0x02 || bSubtype == 0x03) && bLen >= 8) {
+                        uint8_t bTerminalID = extra[apos + 3];
+                        uint8_t bCSourceID = extra[apos + 7];
+                        LOGI("Terminal ID=%d type=%d bCSourceID=%d (iface %d alt %d)",
+                             bTerminalID, bSubtype, bCSourceID,
+                             iface->altsetting[a].bInterfaceNumber,
+                             iface->altsetting[a].bAlternateSetting);
+
+                        if (bCSourceID > 0) {
+                            g_state.clock_source_id = bCSourceID;
+                            g_state.clock_interface = iface->altsetting[a].bInterfaceNumber;
+                            LOGI("Clock source ID=%d from Terminal bCSourceID (iface %d)",
+                                 g_state.clock_source_id, g_state.clock_interface);
+                            goto found_clock;
+                        }
+                    }
+                    apos += bLen;
+                }
+            }
+        }
+
+        /* Fallback: 直接搜索 CLOCK_SOURCE 实体 (bSubtype=0x0A) */
+        for (int i = 0; i < config->bNumInterfaces; i++) {
+            const struct libusb_interface *iface = &config->interface[i];
             for (int a = 0; a < iface->num_altsetting; a++) {
                 const uint8_t *extra = iface->altsetting[a].extra;
                 int extra_len = iface->altsetting[a].extra_length;
@@ -980,13 +1046,12 @@ next_fb:
                     uint8_t bDescType = extra[apos + 1];
                     uint8_t bSubtype = extra[apos + 2];
                     if (bDescType == 0x24 && bSubtype == 0x0A && bLen >= 4) {
-                        /* CLOCK_SOURCE 实体 */
                         g_state.clock_source_id = extra[apos + 3];
                         g_state.clock_interface = iface->altsetting[a].bInterfaceNumber;
-                        LOGI("Clock source ID=%d from interface %d alt %d (bLen=%d)",
+                        LOGI("Clock source ID=%d from fallback CLOCK_SOURCE (iface %d alt %d)",
                              g_state.clock_source_id,
                              g_state.clock_interface,
-                             iface->altsetting[a].bAlternateSetting, bLen);
+                             iface->altsetting[a].bAlternateSetting);
                         goto found_clock;
                     }
                     apos += bLen;
@@ -1122,30 +1187,33 @@ Java_com_example_fold_audio_UsbAudioNative_nativeStart(
 
     ring_reset();
 
-    /* 发送 UAC2 SET_CUR 设置时钟源采样率
-     * 这是 Linux 内核 snd_usb_init_sample_rate() 的等价操作
-     * 对于 ADAPTIVE endpoint，设备需要知道期望的采样率 */
+    /* 发送 UAC2 SET_CUR 设置时钟源采样率 + 验证时钟锁定 */
     if (g_state.clock_source_id > 0) {
         send_sample_rate_cur(g_state.sample_rate);
-    }
 
-    /* 启动 libusb event 线程 */
-    g_state.running = 1;
-    ret = pthread_create(&g_state.event_thread, NULL, event_thread_func, NULL);
-    if (ret != 0) {
-        LOGE("pthread_create failed: %d", ret);
-        g_state.running = 0;
-        return -1;
+        /* 等待时钟锁定（最多 2 秒，每 100ms 检查一次）
+         * 参考 Linux 内核 MOTU quirk: 某些设备需要数秒切换采样率 */
+        int retry;
+        for (retry = 0; retry < 20; retry++) {
+            if (verify_clock_valid()) break;
+            usleep(100000);
+        }
+        if (retry >= 20) {
+            LOGW("Clock did not lock after SET_CUR, continuing anyway");
+        } else if (retry > 0) {
+            LOGI("Clock locked after %d retries", retry);
+        }
     }
 
     /*
-     * 分配并提交 iso transfers
-     * 使用 max_packet_size（最大可能包大小）分配 buffer
-     * 实际每包大小由 iso_callback 中的分数计数动态计算
+     * 先分配并初始化所有 transfer，再启动 event thread。
+     * 这避免了 event thread 在 samples_num 未初始化时收到回调的竞态。
      */
     int buf_size = g_state.packet_size * PACKETS_PER_TRANSFER;
 
-    /* 分配并提交 iso transfers */
+    /* 重置分数计数器，确保 transfer 初始化从干净状态开始 */
+    g_state.samples_num = 0;
+
     for (int i = 0; i < NUM_ISO_TRANSFERS; i++) {
         g_state.transfer_buffers[i] = (uint8_t *)calloc(1, buf_size);
         g_state.transfers[i] = libusb_alloc_transfer(PACKETS_PER_TRANSFER);
@@ -1164,7 +1232,7 @@ Java_com_example_fold_audio_UsbAudioNative_nativeStart(
             PACKETS_PER_TRANSFER,
             iso_callback,
             NULL,
-            1000  /* 1s timeout */
+            1000
         );
 
         /* 用分数计数设置每个 packet 的初始长度 */
@@ -1177,7 +1245,22 @@ Java_com_example_fold_audio_UsbAudioNative_nativeStart(
             }
             g_state.transfers[i]->iso_packet_desc[p].length = this_samples * g_state.frame_size;
         }
+    }
 
+    /* 重置累加器，确保 callback 从干净状态开始 */
+    g_state.samples_num = 0;
+
+    /* 现在启动 event thread — transfer 已完全初始化 */
+    g_state.running = 1;
+    ret = pthread_create(&g_state.event_thread, NULL, event_thread_func, NULL);
+    if (ret != 0) {
+        LOGE("pthread_create failed: %d", ret);
+        g_state.running = 0;
+        goto cleanup_transfers;
+    }
+
+    /* 提交所有 transfers */
+    for (int i = 0; i < NUM_ISO_TRANSFERS; i++) {
         ret = libusb_submit_transfer(g_state.transfers[i]);
         if (ret < 0) {
             LOGE("submit_transfer[%d] failed: %s (handle=%p, endpoint=0x%02X)",
@@ -1188,13 +1271,12 @@ Java_com_example_fold_audio_UsbAudioNative_nativeStart(
 
     g_state.is_playing = 1;
     g_state.underrun_count = 0;
-    g_state.samples_num = 0;  /* 重置累加器 */
 
     /* 初始化自适应 buffer 管理：50ms 预填充 */
-    g_state.prebuffer_bytes = g_state.sample_rate * g_state.frame_size / 20; /* 50ms */
+    g_state.prebuffer_bytes = g_state.sample_rate * g_state.frame_size / 20;
     g_state.consecutive_underruns = 0;
     g_state.consecutive_ok = 0;
-    g_state.ring_watermark = RING_BUFFER_SIZE; /* 初始设为最大值 */
+    g_state.ring_watermark = RING_BUFFER_SIZE;
 
     LOGI("Playback started: %dHz %dbit %dch, %d iso transfers x %d packets, prebuffer=%d bytes (%dms)",
          g_state.sample_rate, g_state.bit_depth, g_state.channels,
@@ -1205,15 +1287,15 @@ Java_com_example_fold_audio_UsbAudioNative_nativeStart(
     return 0;
 
 cleanup_transfers:
-    /* 取消并释放所有已提交的 transfers */
     for (int i = 0; i < NUM_ISO_TRANSFERS; i++) {
         if (g_state.transfers[i]) {
             libusb_cancel_transfer(g_state.transfers[i]);
         }
     }
-    /* 等待 event thread 处理完 cancel 回调 */
-    g_state.running = 0;
-    pthread_join(g_state.event_thread, NULL);
+    if (g_state.running) {
+        g_state.running = 0;
+        pthread_join(g_state.event_thread, NULL);
+    }
     for (int i = 0; i < NUM_ISO_TRANSFERS; i++) {
         if (g_state.transfers[i]) {
             libusb_free_transfer(g_state.transfers[i]);

@@ -11,6 +11,7 @@ import com.example.fold.R
 import com.example.fold.data.model.FileItem
 import com.example.fold.data.provider.LocalFileProvider
 import com.example.fold.util.FoldLogger
+import com.example.fold.util.RootHelper
 import com.example.fold.util.ShizukuHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -53,6 +54,7 @@ data class FileBrowserState(
     val sortFolderOnly: Boolean = false,
     val shizukuAvailable: Boolean = false,
     val shizukuGranted: Boolean = false,
+    val rootAvailable: Boolean = false,
     val isRestrictedPath: Boolean = false,
     val showHiddenFiles: Boolean = false,
     // 复制/移动剪贴板
@@ -146,6 +148,11 @@ class FileBrowserViewModel : ViewModel() {
         ) }
         navigateTo(localFileProvider.getRootPath())
 
+        viewModelScope.launch {
+            val hasRoot = RootHelper.isAvailable()
+            _state.update { it.copy(rootAvailable = hasRoot) }
+        }
+
         // Shizuku 服务绑定成功后，自动刷新受限目录
         ShizukuHelper.onServiceReady = {
             if (ShizukuHelper.needsShizuku(_state.value.currentPath)) {
@@ -197,6 +204,13 @@ class FileBrowserViewModel : ViewModel() {
                                 extension = info.extension
                             )
                         }
+                } else if (isRestricted && !ShizukuHelper.granted.value && _state.value.rootAvailable) {
+                    var result = RootHelper.listDir(path)
+                    if (result.isFailure) {
+                        kotlinx.coroutines.delay(500)
+                        result = RootHelper.listDir(path)
+                    }
+                    result.getOrElse { throw it }
                 } else if (isRestricted && !ShizukuHelper.granted.value) {
                     emptyList()
                 } else {

@@ -16,6 +16,6 @@ data class FileItem(
     val nameWithoutExtension: String get() = if (extension.isNotEmpty()) name.removeSuffix(".$extension") else name
 
     companion object {
-        val SUPPORTED_EXTENSIONS = setOf("txt", "epub", "pdf")
+        val SUPPORTED_EXTENSIONS = setOf("txt", "epub", "pdf", "log", "md", "json", "xml", "csv")
     }
 }

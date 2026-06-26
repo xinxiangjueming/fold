@@ -123,6 +123,6 @@ dependencies {
 
     // Archive support (ZIP/7Z/TAR/GZ/RAR)
     implementation("org.apache.commons:commons-compress:1.27.1")
-    // XZ for 7z LZMA support (bundled with commons-compress)
+    implementation("org.tukaani:xz:1.10")
     // RAR support uses commons-compress internal unrar
 }
