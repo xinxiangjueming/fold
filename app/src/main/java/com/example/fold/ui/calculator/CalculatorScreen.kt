@@ -29,6 +29,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalDensity
@@ -259,7 +260,8 @@ fun CalculatorScreen(
             fontSize = 48.sp,
             fontWeight = FontWeight.Light,
             textAlign = TextAlign.End,
-            maxLines = 1,
+            maxLines = 2,  // 允许换行显示长数字
+            overflow = TextOverflow.Ellipsis,  // 超出时显示省略号
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(bottom = 24.dp)

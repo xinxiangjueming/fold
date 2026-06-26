@@ -22,8 +22,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         /** 通知栏点击后，等待 NavGraph 就绪后跳转到播放页 */
-        @Volatile
-        var pendingOpenPlayer = false
+        var pendingOpenPlayer = androidx.compose.runtime.mutableStateOf(false)
     }
 
     private fun isNightMode(): Boolean {
@@ -57,7 +56,7 @@ class MainActivity : AppCompatActivity() {
 
         // 通知栏点击 → 打开播放页
         if (intent?.getBooleanExtra("OPEN_PLAYER", false) == true) {
-            pendingOpenPlayer = true
+            pendingOpenPlayer.value = true
         }
     }
 
@@ -66,7 +65,7 @@ class MainActivity : AppCompatActivity() {
         setIntent(intent)
         if (intent.getBooleanExtra("OPEN_PLAYER", false)) {
             FoldLogger.i(TAG, "onNewIntent: OPEN_PLAYER")
-            pendingOpenPlayer = true
+            pendingOpenPlayer.value = true
         }
     }
 

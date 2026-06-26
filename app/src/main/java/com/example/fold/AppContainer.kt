@@ -7,6 +7,7 @@ import com.example.fold.data.reader.PdfReader
 import com.example.fold.data.reader.TxtReader
 import com.example.fold.data.server.HttpServer
 import com.example.fold.data.server.PairingManager
+import com.example.fold.audio.UsbAttachLogger
 import com.example.fold.util.FoldLogger
 import java.io.File
 
@@ -78,5 +79,6 @@ object AppContainer {
             defaultHandler?.uncaughtException(thread, throwable)
         }
         FoldLogger.i("Fold_App", "AppContainer initialized, log file: ${FoldLogger.getLogFilePath()}")
+        UsbAttachLogger.start(appContext)
     }
 }

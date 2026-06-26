@@ -90,6 +90,9 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
                     playlistSize = resolvedPlaylist.size,
                     playlistPaths = resolvedPlaylist,
                     audioSessionId = exoPlayer.audioSessionId,
+                    isPlaying = exoPlayer.isPlaying,
+                    duration = exoPlayer.duration.coerceAtLeast(0),
+                    currentPosition = exoPlayer.currentPosition.coerceAtLeast(0),
                     initialized = true
                 )
                 loadAlbumArt(filePath)
@@ -105,6 +108,9 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
                 playlistSize = resolvedPlaylist.size,
                 playlistPaths = resolvedPlaylist,
                 audioSessionId = exoPlayer.audioSessionId,
+                isPlaying = exoPlayer.isPlaying,
+                duration = exoPlayer.duration.coerceAtLeast(0),
+                currentPosition = exoPlayer.currentPosition.coerceAtLeast(0),
                 initialized = true
             )
             loadAlbumArt(filePath)
@@ -148,6 +154,13 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
             audioSessionId = exoPlayer.audioSessionId,
             initialized = true
         )
+        // 同步悬浮小窗状态
+        MiniPlayerState.update(
+            title = initPath.substringAfterLast('/').substringBeforeLast('.'),
+            isPlaying = exoPlayer.isPlaying,
+            albumArt = null,
+            filePath = initPath,
+        )
         loadAlbumArt(initPath)
         loadLyrics(initPath)
 
@@ -162,6 +175,7 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
         playerListener = object : Player.Listener {
             override fun onIsPlayingChanged(playing: Boolean) {
                 _state.value = _state.value.copy(isPlaying = playing)
+                MiniPlayerState.updatePlaying(playing)
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_READY) {
@@ -174,12 +188,20 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
             override fun onMediaItemTransition(item: MediaItem?, reason: Int) {
                 val idx = exoPlayer.currentMediaItemIndex
                 val path = resolvedPlaylist.getOrNull(idx) ?: ""
+                val newTitle = path.substringAfterLast('/').substringBeforeLast('.')
                 _state.value = _state.value.copy(
                     currentIndex = idx,
-                    title = path.substringAfterLast('/').substringBeforeLast('.'),
+                    title = newTitle,
                     duration = exoPlayer.duration.coerceAtLeast(0),
                     currentPosition = 0,
                     currentLyricIndex = -1
+                )
+                // 同步悬浮小窗
+                MiniPlayerState.update(
+                    title = newTitle,
+                    isPlaying = _state.value.isPlaying,
+                    albumArt = null,
+                    filePath = path,
                 )
                 loadAlbumArt(path)
                 loadLyrics(path)
@@ -188,18 +210,22 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
         exoPlayer.addListener(playerListener!!)
     }
 
+    private var lastNotifTitle = ""
+    private var lastNotifIsPlaying = false
+    private var lastNotifPositionMs = -1L
+
     private fun startPolling() {
-        // 进度更新（250ms 一次）
+        // 歌词索引轮询（500ms，仅歌词行变化才更新 state → 只触发歌词区重绘）
         viewModelScope.launch {
             while (isActive) {
-                delay(250)
-                if (MusicPlayerHolder.isActive()) {
-                    _state.value = _state.value.copy(currentPosition = exoPlayer.currentPosition)
+                delay(500)
+                if (MusicPlayerHolder.isActive() && _state.value.lyrics.isNotEmpty()) {
+                    updateLyricIndex(exoPlayer.currentPosition)
                 }
             }
         }
 
-        // 通知状态推送（1 秒一次）
+        // 通知状态推送（1 秒一次，仅状态有变化才调用 MediaSession）
         viewModelScope.launch {
             while (isActive) {
                 delay(1000)
@@ -548,6 +574,13 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
                 val bitmap = if (art != null) BitmapFactory.decodeByteArray(art, 0, art.size) else null
                 retriever.release()
                 _state.value = _state.value.copy(albumArt = bitmap)
+                // 同步悬浮小窗封面
+                MiniPlayerState.update(
+                    title = _state.value.title,
+                    isPlaying = _state.value.isPlaying,
+                    albumArt = bitmap,
+                    filePath = path,
+                )
             } catch (_: Exception) {
                 _state.value = _state.value.copy(albumArt = null)
             }
@@ -558,12 +591,21 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
     private fun pushNotification() {
         val s = _state.value
+        // 直接从 ExoPlayer 读位置，不再依赖 state.currentPosition
+        val pos = exoPlayer.currentPosition
+        val titleChanged = s.title != lastNotifTitle
+        val playingChanged = s.isPlaying != lastNotifIsPlaying
+        val posChanged = (pos - lastNotifPositionMs).coerceAtLeast(0) > 1000
+        if (!titleChanged && !playingChanged && !posChanged) return
+        lastNotifTitle = s.title
+        lastNotifIsPlaying = s.isPlaying
+        lastNotifPositionMs = pos
         MusicNotificationService.updatePlayback(
             title = s.title,
             artist = s.artist,
             albumArt = s.albumArt,
             isPlaying = s.isPlaying,
-            positionMs = s.currentPosition,
+            positionMs = pos,
             durationMs = s.duration
         )
     }

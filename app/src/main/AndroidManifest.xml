@@ -32,6 +32,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
 
+    <!-- USB Audio 独占模式 -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+
     <!-- TTS 引擎可见性（Android 11+ 必须声明） -->
     <queries>
         <intent>
@@ -43,9 +47,9 @@
         android:name=".FoldApp"
         android:allowBackup="true"
         android:enableOnBackInvokedCallback="true"
-        android:icon="@mipmap/ic_launcher"
-        android:roundIcon="@mipmap/ic_launcher_round"
-        android:label="@string/app_name"
+        android:icon="@mipmap/ic_fold"
+        android:roundIcon="@mipmap/ic_fold"
+        android:label="@string/app_name_fold"
         android:supportsRtl="true"
         android:theme="@style/Theme.Fold"
         android:requestLegacyExternalStorage="true"
@@ -119,6 +123,15 @@
             android:name=".service.MusicNotificationService"
             android:foregroundServiceType="mediaPlayback"
             android:exported="false" />
+
+        <!-- USB DAC 插入自动日志 -->
+        <receiver
+            android:name=".audio.UsbAttachReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

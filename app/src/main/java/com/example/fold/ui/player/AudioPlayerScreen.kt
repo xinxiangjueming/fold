@@ -15,9 +15,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import top.yukonga.miuix.kmp.basic.Slider as MiuixSlider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -30,6 +32,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.fold.R
+import com.example.fold.audio.UsbAudioNative
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 音频播放器 — 纯 Compose UI，逻辑在 AudioPlayerViewModel
@@ -62,11 +70,6 @@ fun AudioPlayerScreen(
         }
     }
 
-    // 进度更新时同步歌词索引
-    LaunchedEffect(state.currentPosition) {
-        vm.updateLyricIndex(state.currentPosition)
-    }
-
     val onSurface = MaterialTheme.colorScheme.onSurface
     val onSurfaceVar = MaterialTheme.colorScheme.onSurfaceVariant
     val surface = MaterialTheme.colorScheme.surface
@@ -75,6 +78,13 @@ fun AudioPlayerScreen(
     var showSleepDialog by remember { mutableStateOf(false) }
     var showEqualizer by remember { mutableStateOf(false) }
     var showPlaylist by remember { mutableStateOf(false) }
+    var showUsbDialog by remember { mutableStateOf(false) }
+
+    // USB 独占模式状态
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var isExclusive by remember { mutableStateOf(MusicPlayerHolder.isExclusiveMode) }
+    var exclusiveLabel by remember { mutableStateOf("") }
 
     Column(
         Modifier
@@ -93,6 +103,16 @@ fun AudioPlayerScreen(
                 }
             },
             actions = {
+                // USB 独占模式按钮
+                if (MusicPlayerHolder.isExclusiveSupported()) {
+                    IconButton(onClick = { showUsbDialog = true }) {
+                        Icon(
+                            Icons.Default.Usb,
+                            contentDescription = "USB 独占",
+                            tint = if (isExclusive) MaterialTheme.colorScheme.primary else onSurfaceVar
+                        )
+                    }
+                }
                 if (state.sleepRemaining > 0) {
                     Text("${state.sleepRemaining}min",
                         style = MaterialTheme.typography.labelSmall,
@@ -136,12 +156,14 @@ fun AudioPlayerScreen(
 
         Spacer(Modifier.height(12.dp))
 
-        // ===== 进度条 =====
-        ProgressBar(
-            position = state.currentPosition,
-            duration = state.duration,
-            onSeek = { vm.seekTo(it) }
-        )
+        // ===== 进度条（独立轮询，不触发整屏重组）=====
+        if (state.initialized) {
+            IndependentProgressBar(
+                exoPlayer = vm.exoPlayer,
+                duration = state.duration,
+                onSeek = { vm.seekTo(it) }
+            )
+        }
 
         Spacer(Modifier.height(12.dp))
 
@@ -184,11 +206,54 @@ fun AudioPlayerScreen(
         EqualizerDialog(state.audioSessionId) { showEqualizer = false }
     }
     if (showPlaylist) {
+        // 提取到外部：这两个值不随进度变化，避免每 250ms 重组整个播放列表
+        val playlistNames = remember(state.playlistPaths) {
+            state.playlistPaths.map { it.substringAfterLast('/').substringBeforeLast('.') }
+        }
+        val curIdx = state.currentIndex
         PlaylistDialog(
-            playlist = state.playlistPaths.map { it.substringAfterLast('/').substringBeforeLast('.') },
-            currentIndex = state.currentIndex,
+            playlist = playlistNames,
+            currentIndex = curIdx,
             onSelect = { vm.seekToIndex(it); showPlaylist = false },
             onDismiss = { showPlaylist = false }
+        )
+    }
+
+    // ===== USB 独占模式弹窗 =====
+    if (showUsbDialog) {
+        UsbExclusiveDialog(
+            isExclusive = isExclusive,
+            exclusiveLabel = exclusiveLabel,
+            onEnable = { device, format ->
+                scope.launch {
+                    // USB init 在 IO
+                    val usbReady = withContext(Dispatchers.IO) {
+                        val ua = MusicPlayerHolder.usbAudio ?: UsbAudioNative(context).also { MusicPlayerHolder.setUsbAudio(it) }
+                        val (ok, _) = ua.openAndInit(device)
+                        ok
+                    }
+                    if (usbReady) {
+                        // 切换模式 + 释放旧 player
+                        MusicPlayerHolder.enableExclusiveMode(context, device, format)
+                        MusicPlayerHolder.releasePlayer()
+                        isExclusive = true
+                        exclusiveLabel = "${device.productName} ${format.label}"
+                        // ViewModel 重新 init → getOrCreate 创建独占 player
+                        vm.init(filePath, state.playlistPaths)
+                    }
+                }
+                showUsbDialog = false
+            },
+            onDisable = {
+                MusicPlayerHolder.disableExclusiveMode(context)
+                MusicPlayerHolder.releasePlayer()
+                isExclusive = false
+                exclusiveLabel = ""
+                // ViewModel 重新 init → getOrCreate 创建普通 player
+                vm.init(filePath, state.playlistPaths)
+                showUsbDialog = false
+            },
+            onDismiss = { showUsbDialog = false }
         )
     }
 }
@@ -219,7 +284,7 @@ private fun AlbumOrLyrics(
                 modifier = Modifier.fillMaxSize(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                items(lyrics.size) { idx ->
+                items(lyrics.size, key = { it }) { idx ->
                     Text(
                         text = lyrics[idx].second,
                         fontSize = if (idx == currentLyricIndex) 20.sp else 15.sp,
@@ -243,7 +308,9 @@ private fun AlbumOrLyrics(
             ) {
                 val art = albumArt
                 if (art != null) {
-                    Image(bitmap = art.asImageBitmap(), contentDescription = null,
+                    // remember 缓存：bitmap 不变就不重建 ImageBitmap，避免每帧重绘
+                    val imageBitmap = remember(art) { art.asImageBitmap() }
+                    Image(bitmap = imageBitmap, contentDescription = null,
                         modifier = Modifier.fillMaxSize())
                 } else {
                     Icon(Icons.Filled.MusicNote, contentDescription = null,
@@ -255,27 +322,48 @@ private fun AlbumOrLyrics(
     }
 }
 
-/** 进度条 + 时间 */
+/**
+ * 独立进度条 — 自己管理 250ms 轮询，不依赖主 StateFlow
+ * duration 从外部传入（由 Player.Listener 驱动），position 内部轮询
+ */
 @Composable
-private fun ProgressBar(
-    position: Long,
+private fun IndependentProgressBar(
+    exoPlayer: androidx.media3.exoplayer.ExoPlayer,
     duration: Long,
     onSeek: (Long) -> Unit
 ) {
     if (duration <= 0) return
-    var isDragging by remember { mutableStateOf(false) }
-    var dragPosition by remember { mutableStateOf(position) }
-    val displayPos = if (isDragging) dragPosition else position
 
-    Slider(
-        value = displayPos.toFloat(),
+    var isDragging by remember { mutableStateOf(false) }
+    var dragPosition by remember { mutableStateOf(0L) }
+    var displayPos by remember { mutableStateOf(exoPlayer.currentPosition) }
+
+    // 仅这一个组件内部 250ms 轮询，不影响外部任何 composable
+    LaunchedEffect(exoPlayer) {
+        displayPos = 0L  // player 切换时重置位置
+        while (isActive) {
+            delay(250)
+            if (!isDragging) {
+                displayPos = exoPlayer.currentPosition.coerceAtLeast(0L)
+            }
+        }
+    }
+
+    val pos = if (isDragging) dragPosition else displayPos
+
+    MiuixSlider(
+        value = pos.toFloat(),
         onValueChange = { isDragging = true; dragPosition = it.toLong() },
-        onValueChangeFinished = { onSeek(dragPosition); isDragging = false },
+        onValueChangeFinished = {
+            displayPos = dragPosition
+            onSeek(dragPosition)
+            isDragging = false
+        },
         valueRange = 0f..duration.toFloat(),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth(),
     )
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(formatTime(displayPos), style = MaterialTheme.typography.bodySmall,
+        Text(formatTime(pos), style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(formatTime(duration), style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -343,7 +431,7 @@ private fun FeatureButtons(
             Icon(Icons.Filled.Equalizer, contentDescription = null, tint = variantColor)
         }
         IconButton(onClick = onPlaylistClick) {
-            Icon(Icons.Filled.QueueMusic, contentDescription = null, tint = variantColor)
+            Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = null, tint = variantColor)
         }
     }
 }
@@ -413,7 +501,7 @@ private fun PlaylistDialog(
         },
         text = {
             LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
-                itemsIndexed(playlist) { idx, name ->
+                itemsIndexed(playlist, key = { idx, _ -> idx }) { idx, name ->
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
@@ -502,6 +590,182 @@ private fun EqualizerDialog(audioSessionId: Int, onDismiss: () -> Unit) {
 }
 
 private fun formatTime(ms: Long): String {
-    val totalSeconds = ms / 1000
+    val safeMs = ms.coerceAtLeast(0L)
+    val totalSeconds = safeMs / 1000
     return "%d:%02d".format(totalSeconds / 60, totalSeconds % 60)
+}
+
+/**
+ * USB 独占模式弹窗
+ * 显示设备列表 + 格式选择，支持启用/禁用独占模式
+ */
+@Composable
+private fun UsbExclusiveDialog(
+    isExclusive: Boolean,
+    exclusiveLabel: String,
+    onEnable: (UsbAudioNative.UsbAudioDevice, UsbAudioNative.AudioFormat) -> Unit,
+    onDisable: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var devices by remember { mutableStateOf<List<UsbAudioNative.UsbAudioDevice>>(emptyList()) }
+    var selectedDevice by remember { mutableStateOf<UsbAudioNative.UsbAudioDevice?>(null) }
+    var formats by remember { mutableStateOf<List<UsbAudioNative.AudioFormat>>(emptyList()) }
+    var selectedFormat by remember { mutableStateOf<UsbAudioNative.AudioFormat?>(null) }
+    var isScanning by remember { mutableStateOf(false) }
+    var statusMsg by remember { mutableStateOf("") }
+    var scanDone by remember { mutableStateOf(false) }
+
+    /* 自动扫描：弹窗打开时立即开始 */
+    LaunchedEffect(Unit) {
+        if (!isExclusive && !scanDone) {
+            isScanning = true
+            statusMsg = "扫描设备中..."
+
+            val usbNative = UsbAudioNative(context)
+            val foundDevices = withContext(Dispatchers.IO) { usbNative.scanDevices() }
+            devices = foundDevices
+
+            if (foundDevices.isNotEmpty()) {
+                selectedDevice = foundDevices.first()
+                val dev = foundDevices.first()
+
+                statusMsg = "请求 USB 权限..."
+                val granted = withContext(Dispatchers.IO) {
+                    kotlinx.coroutines.suspendCancellableCoroutine<Boolean> { cont ->
+                        usbNative.requestPermission(dev.usbDevice) { g -> cont.resume(g) {} }
+                    }
+                }
+                if (granted) {
+                    statusMsg = "打开设备..."
+                    val (ok, info) = withContext(Dispatchers.IO) { usbNative.openAndInit(dev) }
+                    if (ok) {
+                        statusMsg = "扫描支持的格式..."
+                        formats = withContext(Dispatchers.IO) { usbNative.scanSupportedFormats() }
+                        selectedFormat = formats.firstOrNull()
+                        statusMsg = if (formats.isNotEmpty()) "" else "设备未报告支持的格式"
+                        MusicPlayerHolder.setUsbAudio(usbNative)
+                    } else {
+                        statusMsg = "打开设备失败: $info"
+                    }
+                } else {
+                    statusMsg = "USB 权限被拒绝"
+                }
+            } else {
+                statusMsg = "未发现 USB Audio 设备"
+            }
+            isScanning = false
+            scanDone = true
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("USB 独占模式", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (isExclusive) {
+                    Text("当前: $exclusiveLabel", color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center)
+                    Text("独占模式已激活\n音频数据直接送达 DAC，绕过系统 mixer",
+                        fontSize = 13.sp, textAlign = TextAlign.Center)
+                } else {
+                    Text("扫描 USB 音频设备，选择后启用独占模式",
+                        fontSize = 13.sp, textAlign = TextAlign.Center)
+
+                    Spacer(Modifier.height(4.dp))
+
+                    /* 扫描进度 */
+                    if (isScanning) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp))
+                            Text(statusMsg, fontSize = 13.sp, color = Color.Gray)
+                        }
+                    }
+
+                    /* 扫描完成后的状态 */
+                    if (!isScanning && statusMsg.isNotEmpty()) {
+                        Text(statusMsg, fontSize = 12.sp, color = Color.Gray, textAlign = TextAlign.Center)
+                    }
+
+                    /* 设备列表 */
+                    if (devices.isNotEmpty()) {
+                        devices.forEach { dev ->
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                RadioButton(
+                                    selected = selectedDevice == dev,
+                                    onClick = { selectedDevice = dev }
+                                )
+                                Text(dev.productName, fontSize = 14.sp)
+                            }
+                        }
+                    }
+
+                    /* 格式选择 */
+                    if (formats.isNotEmpty()) {
+                        Spacer(Modifier.height(4.dp))
+                        Text("支持的格式:", fontSize = 13.sp, color = Color.Gray)
+                        val grouped = formats.groupBy { it.sampleRate }
+                        grouped.forEach { (rate, fmts) ->
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                fmts.forEach { fmt ->
+                                    FilterChip(
+                                        selected = selectedFormat == fmt,
+                                        onClick = { selectedFormat = fmt },
+                                        label = { Text("${rate / 1000}k ${fmt.bitDepth}bit") },
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    /* 重新扫描按钮 */
+                    if (!isScanning && scanDone) {
+                        Spacer(Modifier.height(4.dp))
+                        TextButton(onClick = {
+                            scanDone = false
+                            devices = emptyList()
+                            formats = emptyList()
+                            selectedFormat = null
+                            statusMsg = ""
+                        }) { Text("重新扫描", fontSize = 13.sp) }
+                    }
+                }
+
+                /* 按钮行：单独取消时居中，有操作按钮时取消在左、操作在右 */
+                Spacer(Modifier.height(12.dp))
+                val hasAction = isExclusive || (selectedDevice != null && selectedFormat != null)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = if (hasAction) Arrangement.SpaceBetween else Arrangement.Center,
+                ) {
+                    TextButton(onClick = onDismiss) { Text("取消") }
+                    if (isExclusive) {
+                        TextButton(onClick = onDisable) {
+                            Text("关闭独占", color = Color.Red)
+                        }
+                    } else if (selectedDevice != null && selectedFormat != null) {
+                        TextButton(onClick = { onEnable(selectedDevice!!, selectedFormat!!) }) {
+                            Text("启用独占")
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {},
+    )
 }

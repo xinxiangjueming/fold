@@ -8,7 +8,9 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
@@ -538,7 +540,7 @@ fun FileBrowserScreen(
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.action_move)) },
                             onClick = { menuTargetFile = null; viewModel.moveFile(file) },
-                            leadingIcon = { Icon(Icons.Filled.DriveFileMove, contentDescription = null) }
+                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = null) }
                         )
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.action_copy_path)) },
@@ -684,7 +686,7 @@ private fun SortDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.sort_title), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) },
         text = {
-            Column {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 options.forEach { (mode, label) ->
                     Row(
                         modifier = Modifier

@@ -2,18 +2,27 @@ package com.example.fold.ui.navigation
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.navArgument
 import com.example.fold.MainActivity
 import com.example.fold.ui.filebrowser.FileBrowserScreen
 import com.example.fold.ui.calculator.CalculatorScreen
 import com.example.fold.ui.hidden.HiddenAppsScreen
 import com.example.fold.ui.player.AudioPlayerScreen
+import com.example.fold.ui.player.MiniPlayerFloatingWidget
+import com.example.fold.ui.player.MiniPlayerState
+import com.example.fold.ui.player.MusicPlayerHolder
 import com.example.fold.ui.player.VideoPlayerScreen
 import com.example.fold.ui.reader.ReaderScreen
 import com.example.fold.ui.viewer.ArchiveViewerScreen
@@ -64,11 +73,11 @@ fun AppNavGraph(navController: NavHostController) {
 
     // 通知栏点击 → 自动打开播放页
     androidx.compose.runtime.LaunchedEffect(Unit) {
-        androidx.compose.runtime.snapshotFlow { MainActivity.pendingOpenPlayer }
+        androidx.compose.runtime.snapshotFlow { MainActivity.pendingOpenPlayer.value }
             .collect { pending ->
                 if (pending) {
-                    MainActivity.pendingOpenPlayer = false
-                    val filePath = com.example.fold.ui.player.MusicPlayerHolder.lastFilePath
+                    MainActivity.pendingOpenPlayer.value = false
+                    val filePath = MusicPlayerHolder.lastFilePath
                     if (filePath.isNotEmpty()) {
                         FoldLogger.i("NavGraph", "auto-navigate to player: $filePath")
                         navController.navigate(Routes.audio(filePath))
@@ -81,7 +90,36 @@ fun AppNavGraph(navController: NavHostController) {
         .getBoolean("calculator_mode", false)
     val startDest = if (calculatorMode) Routes.CALCULATOR else Routes.FILE_BROWSER
 
-    NavHost(
+    // 追踪当前路由，决定是否显示悬浮小窗
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route
+    val miniState by MiniPlayerState.state.collectAsState()
+    val showMiniPlayer = currentRoute != Routes.AUDIO && miniState.filePath.isNotEmpty() && currentRoute != null
+
+    // 当 ViewModel 销毁但 MusicPlayerHolder 仍有活跃播放器时，同步 MiniPlayerState
+    androidx.compose.runtime.LaunchedEffect(currentRoute) {
+        if (currentRoute != Routes.AUDIO && MusicPlayerHolder.isActive()) {
+            val player = MusicPlayerHolder.exoPlayer!!
+            val currentPath = MusicPlayerHolder.lastFilePath
+            if (currentPath.isNotEmpty() && MiniPlayerState.state.value.filePath != currentPath) {
+                MiniPlayerState.update(
+                    title = currentPath.substringAfterLast('/').substringBeforeLast('.'),
+                    isPlaying = player.isPlaying,
+                    albumArt = null,
+                    filePath = currentPath,
+                )
+            }
+            // 持续轮询 isPlaying 状态（ViewModel 销毁后 listener 已移除）
+            while (MusicPlayerHolder.isActive()) {
+                kotlinx.coroutines.delay(500)
+                val p = MusicPlayerHolder.exoPlayer ?: break
+                MiniPlayerState.updatePlaying(p.isPlaying)
+            }
+        }
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        NavHost(
         navController = navController,
         startDestination = startDest,
         enterTransition = {
@@ -205,4 +243,28 @@ fun AppNavGraph(navController: NavHostController) {
             )
         }
     }
+
+    // 悬浮小窗播放器 — 仅在非播放页且有活跃播放器时显示
+    if (showMiniPlayer) {
+        MiniPlayerFloatingWidget(
+            onOpenPlayer = {
+                val fp = MiniPlayerState.state.value.filePath
+                if (fp.isNotEmpty()) {
+                    navController.popBackStack(Routes.AUDIO_BASE, true)
+                    navController.navigate(Routes.audio(fp))
+                }
+            },
+            onTogglePlay = {
+                val player = MusicPlayerHolder.exoPlayer
+                if (player != null) {
+                    if (player.isPlaying) player.pause() else player.play()
+                }
+            },
+            onClose = {
+                MusicPlayerHolder.release(context)
+            }
+        )
+    }
 }
+}
+
