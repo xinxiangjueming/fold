@@ -107,6 +107,8 @@
     <string name="reader_replace_new">替换为</string>
     <string name="reader_re_segment">重新分段</string>
     <string name="reader_re_segment_desc">智能分段，适合大段未分段的文本</string>
+    <string name="reader_volume_page_turn">音量键翻页</string>
+    <string name="reader_stealth_mode">息屏归隐</string>
     <string name="reader_tts">朗读</string>
     <string name="tts_no_engine">未找到语音引擎，请安装 Google TTS 或其他 TTS 应用</string>
     <string name="chinese_convert">繁简转换</string>

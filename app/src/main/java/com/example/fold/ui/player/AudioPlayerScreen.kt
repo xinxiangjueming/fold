@@ -226,23 +226,21 @@ fun AudioPlayerScreen(
             exclusiveLabel = exclusiveLabel,
             onEnable = { device, format ->
                 scope.launch {
-                    // USB init 在 IO
-                    val usbReady = withContext(Dispatchers.IO) {
+                    // 确保设备已打开（LaunchedEffect 扫描阶段可能已 openAndInit 过）
+                    withContext(Dispatchers.IO) {
                         val ua = MusicPlayerHolder.usbAudio ?: UsbAudioNative(context).also { MusicPlayerHolder.setUsbAudio(it) }
-                        val (ok, _) = ua.openAndInit(device)
-                        ok
+                        ua.openAndInit(device)
                     }
-                    if (usbReady) {
-                        // 切换模式 + 释放旧 player
-                        MusicPlayerHolder.enableExclusiveMode(context, device, format)
-                        MusicPlayerHolder.releasePlayer()
-                        isExclusive = true
-                        exclusiveLabel = "${device.productName} ${format.label}"
-                        // ViewModel 重新 init → getOrCreate 创建独占 player
-                        vm.init(filePath, state.playlistPaths)
-                    }
+                    // 切换模式 + 释放旧 player
+                    MusicPlayerHolder.enableExclusiveMode(context, device, format)
+                    MusicPlayerHolder.releasePlayer()
+                    isExclusive = true
+                    exclusiveLabel = "${device.productName} ${format.label}"
+                    // ViewModel 重新 init → getOrCreate 创建独占 player
+                    vm.init(filePath, state.playlistPaths)
+                    // 状态更新完毕后再关闭弹窗，确保图标颜色同步刷新
+                    showUsbDialog = false
                 }
-                showUsbDialog = false
             },
             onDisable = {
                 MusicPlayerHolder.disableExclusiveMode(context)

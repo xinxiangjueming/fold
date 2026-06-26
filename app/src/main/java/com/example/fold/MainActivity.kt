@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import android.os.SystemClock
+import android.view.KeyEvent
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.compose.setContent
@@ -23,6 +24,25 @@ class MainActivity : AppCompatActivity() {
     companion object {
         /** 通知栏点击后，等待 NavGraph 就绪后跳转到播放页 */
         var pendingOpenPlayer = androidx.compose.runtime.mutableStateOf(false)
+        /** 息屏归隐：等待 Compose 就绪后导航到计算器 */
+        var pendingNavigateCalculator = androidx.compose.runtime.mutableStateOf(false)
+        /** 阅读器是否处于活跃状态（用于音量键翻页判断） */
+        @Volatile
+        var readerActive = false
+        /** 息屏归隐：等待 onResume 时导航到计算器 */
+        @Volatile
+        var pendingStealthNavigate = false
+
+        /** 切换伪装后更新 Activity intent，防止系统用已禁用的 alias 恢复任务 */
+        fun updateActivityIntent(activity: MainActivity, calculatorMode: Boolean) {
+            val alias = if (calculatorMode) "${activity.packageName}.AliasCalc" else "${activity.packageName}.AliasFold"
+            activity.intent = android.content.Intent().apply {
+                component = android.content.ComponentName(activity.packageName, alias)
+                action = android.content.Intent.ACTION_MAIN
+                addCategory(android.content.Intent.CATEGORY_LAUNCHER)
+            }
+            FoldLogger.i("FoldMain", "updateActivityIntent: alias=$alias")
+        }
     }
 
     private fun isNightMode(): Boolean {
@@ -58,6 +78,11 @@ class MainActivity : AppCompatActivity() {
         if (intent?.getBooleanExtra("OPEN_PLAYER", false) == true) {
             pendingOpenPlayer.value = true
         }
+
+        // 初始化时同步 intent 指向当前启用的 alias
+        val isCalcMode = getSharedPreferences("file_sort", MODE_PRIVATE)
+            .getBoolean("calculator_mode", false)
+        updateActivityIntent(this, isCalcMode)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -71,8 +96,35 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        FoldLogger.d(TAG, "onResume: rechecking Shizuku")
-        // 从 Shizuku 切回来时重新检查状态
+        FoldLogger.d(TAG, "onResume: rechecking Shizuku, pendingStealth=$pendingStealthNavigate")
         ShizukuHelper.recheck()
+        // 息屏归隐：延迟一帧触发导航，确保 Activity 完全就绪
+        if (pendingStealthNavigate) {
+            pendingStealthNavigate = false
+            android.os.Handler(mainLooper).post {
+                pendingNavigateCalculator.value = true
+            }
+        }
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        val isVolume = keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
+        FoldLogger.d(TAG, "onKeyDown: keyCode=$keyCode, isVolume=$isVolume, readerActive=$readerActive")
+        if (isVolume && readerActive) {
+            val prefs = getSharedPreferences("reader_prefs", MODE_PRIVATE)
+            val volPref = prefs.getBoolean("volume_page_turn", false)
+            FoldLogger.d(TAG, "onKeyDown: volume_page_turn pref=$volPref")
+            if (volPref) {
+                val readerEvent = if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+                    com.example.fold.ui.reader.ReaderEvent.VOLUME_UP
+                } else {
+                    com.example.fold.ui.reader.ReaderEvent.VOLUME_DOWN
+                }
+                FoldLogger.i(TAG, "onKeyDown: emitting $readerEvent")
+                com.example.fold.ui.reader.ReaderEventBus.emit(readerEvent)
+                return true
+            }
+        }
+        return super.onKeyDown(keyCode, event)
     }
 }

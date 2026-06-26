@@ -40,6 +40,9 @@ internal fun ReaderSettingsPanel(
     onChineseConvertCycle: () -> Unit,
     onAddReplacement: (String, String) -> Unit,
     onRemoveReplacement: (String) -> Unit,
+    onVolumePageTurnToggle: () -> Unit,
+    onStealthModeToggle: () -> Unit,
+    showStealthMode: Boolean,
     onDismiss: () -> Unit
 ) {
     val fontPickerLauncher = rememberLauncherForActivityResult(
@@ -107,6 +110,28 @@ internal fun ReaderSettingsPanel(
             Text(stringResource(R.string.reader_margin_right), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Slider(value = state.marginRight, onValueChange = { onMarginsChange(state.marginLeft, it) }, valueRange = 0f..60f, steps = 11)
             Spacer(Modifier.height(12.dp))
+
+            // 音量键翻页
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(stringResource(R.string.reader_volume_page_turn), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+                Switch(checked = state.volumePageTurn, onCheckedChange = { onVolumePageTurnToggle() })
+            }
+            Spacer(Modifier.height(12.dp))
+
+            // 息屏归隐（仅在计算器伪装模式下显示）
+            if (showStealthMode) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(stringResource(R.string.reader_stealth_mode), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+                    Switch(checked = state.stealthMode, onCheckedChange = { onStealthModeToggle() })
+                }
+                Spacer(Modifier.height(12.dp))
+            }
 
             // 重新分段
             Row(

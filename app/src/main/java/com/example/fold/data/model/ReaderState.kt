@@ -53,7 +53,11 @@ data class ReaderState(
     // 重新分段
     val reSegment: Boolean = false,
     // 繁简转换：0=关闭, 1=转繁体, 2=转简体
-    val chineseConvert: Int = 0
+    val chineseConvert: Int = 0,
+    // 音量键翻页
+    val volumePageTurn: Boolean = false,
+    // 息屏归隐：息屏时自动保存进度并退回计算器
+    val stealthMode: Boolean = false
 )
 
 data class Chapter(

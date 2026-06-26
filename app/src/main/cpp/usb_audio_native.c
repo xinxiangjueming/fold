@@ -139,7 +139,8 @@ typedef struct {
     int samples_num;             /* 分数计数：分子累加器 */
     int samples_den;             /* 分数计数：分母（简化后的 8000/gcd） */
     int samples_rem;             /* 分数计数：简化后的分子（sample_rate/gcd） */
-    int clock_source_id;         /* UAC2 时钟源 ID（从 AS_GENERAL 获取） */
+    int clock_source_id;         /* UAC2 时钟源 ID（从 AC 接口获取） */
+    int clock_interface;         /* UAC2 时钟源所在接口号（通常是 AC=0） */
 
     /* PCM Ring Buffer */
     uint8_t *ring_buffer;
@@ -264,10 +265,11 @@ static int send_sample_rate_cur(int sample_rate) {
      * bmRequestType: USB_TYPE_CLASS | USB_RECIP_INTERFACE | USB_DIR_OUT = 0x21
      * bRequest: UAC2_CS_CUR = 0x01
      * wValue: UAC2_CS_CONTROL_SAM_FREQ << 8 = 0x0100
-     * wIndex: interface_number | (clock_source_id << 8)
+     * wIndex: ac_interface_number | (clock_source_id << 8)
+     * 注意：必须用 AC 接口号（通常是 0），不是 AS 接口号
      */
     uint16_t wValue = UAC2_CS_CONTROL_SAM_FREQ << 8;
-    uint16_t wIndex = g_state.interface_num | (g_state.clock_source_id << 8);
+    uint16_t wIndex = g_state.clock_interface | (g_state.clock_source_id << 8);
 
     LOGI("SET_CUR clock source: rate=%d clock_id=%d wValue=0x%04X wIndex=0x%04X",
          sample_rate, g_state.clock_source_id, wValue, wIndex);
@@ -959,33 +961,41 @@ next_fb:
         }
     }
 
-    /* 从匹配的 interface 的 AS_GENERAL 描述符提取时钟源 ID */
+    /* 从 AudioControl 接口的 clock source 实体提取时钟源 ID
+     * UAC2 的 clock source 定义在 AC 接口（bInterfaceSubClass=0x01），
+     * 不在 AS 接口。旧代码只搜 AS 接口导致 clock_source_id=0，SET_CUR 不发送，
+     * 设备不知道采样率 → 输出噪声 */
     if (g_state.clock_source_id == 0) {
-        const struct libusb_interface *matched_iface =
-            &config->interface[0]; /* 会被下面的循环修正 */
         for (int i = 0; i < config->bNumInterfaces; i++) {
             const struct libusb_interface *iface = &config->interface[i];
-            if (iface->num_altsetting > 0 &&
-                iface->altsetting[0].bInterfaceNumber == g_state.interface_num) {
-                matched_iface = iface;
-                break;
+            if (iface->num_altsetting == 0) continue;
+            /* 搜索所有接口的 alt setting 0（主描述符） */
+            for (int a = 0; a < iface->num_altsetting; a++) {
+                const uint8_t *extra = iface->altsetting[a].extra;
+                int extra_len = iface->altsetting[a].extra_length;
+                int apos = 0;
+                while (apos + 2 < extra_len) {
+                    uint8_t bLen = extra[apos];
+                    if (bLen < 3 || apos + bLen > extra_len) break;
+                    uint8_t bDescType = extra[apos + 1];
+                    uint8_t bSubtype = extra[apos + 2];
+                    if (bDescType == 0x24 && bSubtype == 0x0A && bLen >= 4) {
+                        /* CLOCK_SOURCE 实体 */
+                        g_state.clock_source_id = extra[apos + 3];
+                        g_state.clock_interface = iface->altsetting[a].bInterfaceNumber;
+                        LOGI("Clock source ID=%d from interface %d alt %d (bLen=%d)",
+                             g_state.clock_source_id,
+                             g_state.clock_interface,
+                             iface->altsetting[a].bAlternateSetting, bLen);
+                        goto found_clock;
+                    }
+                    apos += bLen;
+                }
             }
         }
-        if (matched_iface->num_altsetting > 0) {
-            const uint8_t *extra = matched_iface->altsetting[0].extra;
-            int extra_len = matched_iface->altsetting[0].extra_length;
-            int apos = 0;
-            while (apos < extra_len) {
-                uint8_t bLen = extra[apos];
-                if (bLen < 2 || apos + bLen > extra_len) break;
-                if (extra[apos + 1] == 0x24 && bLen >= 3 &&
-                    extra[apos + 2] == UAC_AS_GENERAL && bLen >= 4) {
-                    g_state.clock_source_id = extra[apos + 3];
-                    LOGI("Clock source ID from AS_GENERAL: %d", g_state.clock_source_id);
-                    break;
-                }
-                apos += bLen;
-            }
+        found_clock:
+        if (g_state.clock_source_id == 0) {
+            LOGW("No clock source found in any interface descriptor");
         }
     }
 
@@ -1100,6 +1110,16 @@ Java_com_example_fold_audio_UsbAudioNative_nativeStart(
 {
     int ret;
 
+    /* 安全检查：确保设备连接有效 */
+    if (!g_state.handle) {
+        LOGE("nativeStart called but g_state.handle is NULL");
+        return -1;
+    }
+    if (g_state.endpoint_addr <= 0) {
+        LOGE("nativeStart called but endpoint_addr=0x%02X (invalid)", g_state.endpoint_addr);
+        return -1;
+    }
+
     ring_reset();
 
     /* 发送 UAC2 SET_CUR 设置时钟源采样率
@@ -1114,6 +1134,7 @@ Java_com_example_fold_audio_UsbAudioNative_nativeStart(
     ret = pthread_create(&g_state.event_thread, NULL, event_thread_func, NULL);
     if (ret != 0) {
         LOGE("pthread_create failed: %d", ret);
+        g_state.running = 0;
         return -1;
     }
 
@@ -1131,7 +1152,7 @@ Java_com_example_fold_audio_UsbAudioNative_nativeStart(
 
         if (!g_state.transfers[i] || !g_state.transfer_buffers[i]) {
             LOGE("Transfer alloc failed at %d", i);
-            return -1;
+            goto cleanup_transfers;
         }
 
         libusb_fill_iso_transfer(
@@ -1159,8 +1180,9 @@ Java_com_example_fold_audio_UsbAudioNative_nativeStart(
 
         ret = libusb_submit_transfer(g_state.transfers[i]);
         if (ret < 0) {
-            LOGE("submit_transfer[%d] failed: %s", i, libusb_error_name(ret));
-            return ret;
+            LOGE("submit_transfer[%d] failed: %s (handle=%p, endpoint=0x%02X)",
+                 i, libusb_error_name(ret), g_state.handle, g_state.endpoint_addr);
+            goto cleanup_transfers;
         }
     }
 
@@ -1181,6 +1203,28 @@ Java_com_example_fold_audio_UsbAudioNative_nativeStart(
          g_state.prebuffer_bytes * 1000 / (g_state.sample_rate * g_state.frame_size));
 
     return 0;
+
+cleanup_transfers:
+    /* 取消并释放所有已提交的 transfers */
+    for (int i = 0; i < NUM_ISO_TRANSFERS; i++) {
+        if (g_state.transfers[i]) {
+            libusb_cancel_transfer(g_state.transfers[i]);
+        }
+    }
+    /* 等待 event thread 处理完 cancel 回调 */
+    g_state.running = 0;
+    pthread_join(g_state.event_thread, NULL);
+    for (int i = 0; i < NUM_ISO_TRANSFERS; i++) {
+        if (g_state.transfers[i]) {
+            libusb_free_transfer(g_state.transfers[i]);
+            g_state.transfers[i] = NULL;
+        }
+        if (g_state.transfer_buffers[i]) {
+            free(g_state.transfer_buffers[i]);
+            g_state.transfer_buffers[i] = NULL;
+        }
+    }
+    return -1;
 }
 
 /*
@@ -1225,7 +1269,7 @@ Java_com_example_fold_audio_UsbAudioNative_nativeStop(
         pthread_join(g_state.event_thread, NULL);
     }
 
-    /* 释放 transfers */
+    /* 释放 transfers 并置 NULL 防止悬空指针 */
     for (int i = 0; i < NUM_ISO_TRANSFERS; i++) {
         if (g_state.transfers[i]) {
             libusb_free_transfer(g_state.transfers[i]);

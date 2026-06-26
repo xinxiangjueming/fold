@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.fold.MainActivity
 import com.example.fold.R
 import com.example.fold.data.model.BookmarkEntry
 import com.example.fold.data.model.Chapter
@@ -77,6 +78,47 @@ fun ReaderScreen(
         viewModel.startTts()
     }
     val bookmarkSavedMsg = stringResource(R.string.reader_bookmark_saved)
+
+    // 标记阅读器活跃状态（供 MainActivity 音量键拦截判断）
+    DisposableEffect(Unit) {
+        MainActivity.readerActive = true
+        FoldLogger.i("ReaderVol", "ReaderScreen: readerActive=true")
+        onDispose {
+            MainActivity.readerActive = false
+            FoldLogger.i("ReaderVol", "ReaderScreen: readerActive=false")
+        }
+    }
+
+    // 息屏归隐：注册 ACTION_SCREEN_OFF 广播接收器
+    val screenOffReceiver = remember {
+        object : android.content.BroadcastReceiver() {
+            override fun onReceive(ctx: android.content.Context?, intent: android.content.Intent?) {
+                if (intent?.action == android.content.Intent.ACTION_SCREEN_OFF) {
+                    val stealth = viewModel.state.value.stealthMode
+                    FoldLogger.i("ReaderScreen", "ACTION_SCREEN_OFF received, stealthMode=$stealth")
+                    if (stealth) {
+                        viewModel.onScreenOff()
+                        MainActivity.pendingStealthNavigate = true
+                    }
+                }
+            }
+        }
+    }
+    DisposableEffect(Unit) {
+        val filter = android.content.IntentFilter(android.content.Intent.ACTION_SCREEN_OFF)
+        context.registerReceiver(screenOffReceiver, filter)
+        onDispose {
+            try { context.unregisterReceiver(screenOffReceiver) } catch (_: Exception) {}
+        }
+    }
+
+    // 音量键翻页：滚动逻辑在各格式内容组件内处理（TxtReaderContent / EpubReaderContent / PdfReaderContent）
+
+    // 读取计算器伪装状态（用于控制息屏归隐选项的显示）
+    val calculatorMode = remember {
+        context.getSharedPreferences("file_sort", android.content.Context.MODE_PRIVATE)
+            .getBoolean("calculator_mode", false)
+    }
 
     // 阅读主题颜色
     val theme = state.readingTheme
@@ -230,6 +272,9 @@ fun ReaderScreen(
                         onChineseConvertCycle = { viewModel.cycleChineseConvert() },
                         onAddReplacement = { o, r -> viewModel.addWordReplacement(o, r) },
                         onRemoveReplacement = { o -> viewModel.removeWordReplacement(o) },
+                        onVolumePageTurnToggle = { viewModel.toggleVolumePageTurn() },
+                        onStealthModeToggle = { viewModel.toggleStealthMode() },
+                        showStealthMode = calculatorMode,
                         onDismiss = { showSettings = false }
                     )
                 }
@@ -384,6 +429,54 @@ private fun TxtReaderContent(
     // 已加载的章节数量（初始从当前章节开始，向下追加）
     val loadedCount = remember { mutableIntStateOf(1) }
     val lazyListState = androidx.compose.foundation.lazy.rememberLazyListState()
+
+    // 音量键翻页（参照 Legado ScrollPageDelegate）
+    // 滚动一屏高度，保留一行重叠保证连续性；到底切下一章，到顶切上一章末尾
+    val viewHeightPx = with(LocalDensity.current) {
+        androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * density
+    }
+    // 保留一行重叠 ≈ 字号 × 行距，滚动量 = 屏高 - 重叠
+    val overlapPx = with(LocalDensity.current) { state.fontSize * state.lineSpacing * density }
+    val pageScrollPx = viewHeightPx - overlapPx
+
+    LaunchedEffect(Unit) {
+        ReaderEventBus.events.collect { event ->
+            if (!state.volumePageTurn) return@collect
+            FoldLogger.i("ReaderVol", "handling $event, pageScrollPx=$pageScrollPx")
+            when (event) {
+                ReaderEvent.VOLUME_DOWN -> {
+                    val bIdx = lazyListState.firstVisibleItemIndex
+                    val bOff = lazyListState.firstVisibleItemScrollOffset
+                    lazyListState.scroll { scrollBy(pageScrollPx) }
+                    val aIdx = lazyListState.firstVisibleItemIndex
+                    val aOff = lazyListState.firstVisibleItemScrollOffset
+                    if (bIdx == aIdx && bOff == aOff) {
+                        val nextIdx = state.currentChapterIndex + 1
+                        if (nextIdx < chapters.size) {
+                            FoldLogger.d("ReaderVol", "→ chapter $nextIdx")
+                            loadedCount.intValue = 1
+                            viewModel.updateTxtChapter(nextIdx)
+                        }
+                    }
+                }
+                ReaderEvent.VOLUME_UP -> {
+                    val bIdx = lazyListState.firstVisibleItemIndex
+                    val bOff = lazyListState.firstVisibleItemScrollOffset
+                    lazyListState.scroll { scrollBy(-pageScrollPx) }
+                    val aIdx = lazyListState.firstVisibleItemIndex
+                    val aOff = lazyListState.firstVisibleItemScrollOffset
+                    if (bIdx == aIdx && bOff == aOff && bIdx == 0 && bOff == 0) {
+                        val prevIdx = state.currentChapterIndex - 1
+                        if (prevIdx >= 0) {
+                            FoldLogger.d("ReaderVol", "→ chapter $prevIdx")
+                            loadedCount.intValue = 1
+                            viewModel.updateTxtChapter(prevIdx)
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // 章节变化时重置
     LaunchedEffect(state.currentChapterIndex) {
@@ -633,6 +726,19 @@ private fun EpubReaderContent(
 
     val webViewRef = remember { mutableStateOf<WebView?>(null) }
 
+    // 音量键翻页：JS 滚动一屏
+    LaunchedEffect(Unit) {
+        ReaderEventBus.events.collect { event ->
+            if (!state.volumePageTurn) return@collect
+            FoldLogger.i("ReaderVol", "EpubReaderContent: handling $event")
+            val js = when (event) {
+                ReaderEvent.VOLUME_UP -> "window.scrollBy({top:-(window.innerHeight-40),behavior:'smooth'})"
+                ReaderEvent.VOLUME_DOWN -> "window.scrollBy({top:(window.innerHeight-40),behavior:'smooth'})"
+            }
+            webViewRef.value?.evaluateJavascript(js, null)
+        }
+    }
+
     DisposableEffect(Unit) {
         onDispose {
             webViewRef.value?.destroy()
@@ -793,6 +899,26 @@ private fun PdfReaderContent(
     val pagerState = rememberPagerState(initialPage = state.currentPage.coerceIn(0, (totalPages - 1).coerceAtLeast(0))) { totalPages }
     val context = LocalContext.current
     val screenWidthPx = context.resources.displayMetrics.widthPixels
+
+    // 音量键翻页：PDF 翻页
+    LaunchedEffect(Unit) {
+        ReaderEventBus.events.collect { event ->
+            if (!state.volumePageTurn) return@collect
+            FoldLogger.i("ReaderVol", "PdfReaderContent: handling $event")
+            when (event) {
+                ReaderEvent.VOLUME_UP -> {
+                    if (pagerState.currentPage > 0) {
+                        pagerState.animateScrollToPage(pagerState.currentPage - 1)
+                    }
+                }
+                ReaderEvent.VOLUME_DOWN -> {
+                    if (pagerState.currentPage < totalPages - 1) {
+                        pagerState.animateScrollToPage(pagerState.currentPage + 1)
+                    }
+                }
+            }
+        }
+    }
 
     // 滑动翻页时渲染当前页
     LaunchedEffect(pagerState.currentPage) {

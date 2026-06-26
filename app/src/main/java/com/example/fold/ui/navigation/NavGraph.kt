@@ -85,6 +85,19 @@ fun AppNavGraph(navController: NavHostController) {
                 }
             }
     }
+    // 息屏归隐 → 导航到计算器
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        androidx.compose.runtime.snapshotFlow { MainActivity.pendingNavigateCalculator.value }
+            .collect { pending ->
+                if (pending) {
+                    MainActivity.pendingNavigateCalculator.value = false
+                    FoldLogger.i("NavGraph", "stealth navigate to calculator")
+                    navController.navigate(Routes.CALCULATOR) {
+                        popUpTo(Routes.FILE_BROWSER)
+                    }
+                }
+            }
+    }
     // 每次重组都读取，确保切换后立即生效（不需要重启app）
     val calculatorMode = context.getSharedPreferences("file_sort", android.content.Context.MODE_PRIVATE)
         .getBoolean("calculator_mode", false)

@@ -70,6 +70,15 @@ fun FileBrowserScreen(
     val calculatorMode by viewModel.calculatorMode.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
+    // 切换伪装后同步更新 Activity intent（防止系统用已禁用的 alias 恢复任务）
+    DisposableEffect(viewModel) {
+        viewModel.onCalculatorModeChanged = { isCalc ->
+            val activity = context as? com.example.fold.MainActivity
+            if (activity != null) com.example.fold.MainActivity.updateActivityIntent(activity, isCalc)
+        }
+        onDispose { viewModel.onCalculatorModeChanged = null }
+    }
+
     // 每次进入页面时重新检查 Shizuku 状态
     LaunchedEffect(Unit) {
         FoldLogger.i(TAG, "FileBrowserScreen: composed, path=${state.currentPath}, files=${files.size}")

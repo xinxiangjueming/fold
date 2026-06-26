@@ -100,8 +100,9 @@ class UsbExclusiveAudioSink(
         /* 启动 ISO 传输——此时 handleBuffer 可以接收数据了 */
         val result = usbAudio.startPlayback(sampleRate, usbBitDepth, usbChannels)
         if (result < 0) {
-            android.util.Log.e("UsbSink", "startPlayback failed: $result")
+            android.util.Log.e("UsbSink", "startPlayback failed: $result, cleaning up")
             isPlaying = false
+            usbAudio.stopPlayback()
         }
     }
 

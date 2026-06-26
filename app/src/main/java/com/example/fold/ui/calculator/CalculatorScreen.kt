@@ -31,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
@@ -217,6 +218,11 @@ fun CalculatorScreen(
 
     // 高级计算开关（持久化）
     val context = LocalContext.current
+    // 返回键：退到后台而非 finish，避免系统用已禁用的 AliasFold 恢复任务
+    androidx.activity.compose.BackHandler {
+        val activity = context as? android.app.Activity
+        activity?.moveTaskToBack(true)
+    }
     val prefs = remember { context.getSharedPreferences("file_sort", android.content.Context.MODE_PRIVATE) }
     var showAdvanced by remember { mutableStateOf(prefs.getBoolean("calc_advanced", false)) }
 

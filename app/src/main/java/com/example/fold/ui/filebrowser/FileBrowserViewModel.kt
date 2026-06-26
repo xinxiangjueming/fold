@@ -85,6 +85,9 @@ class FileBrowserViewModel : ViewModel() {
     private val _calculatorMode = MutableStateFlow(prefs.getBoolean("calculator_mode", false))
     val calculatorMode: StateFlow<Boolean> = _calculatorMode.asStateFlow()
 
+    /** 切换伪装后回调（用于更新 Activity intent） */
+    var onCalculatorModeChanged: ((Boolean) -> Unit)? = null
+
     fun toggleCalculatorMode() {
         val newValue = !_calculatorMode.value
         FoldLogger.i(TAG, "toggleCalculatorMode: ${!newValue} -> $newValue")
@@ -93,6 +96,8 @@ class FileBrowserViewModel : ViewModel() {
 
         // 切换桌面图标和名称
         switchLauncherAlias(newValue)
+        // 通知外部更新 Activity intent
+        onCalculatorModeChanged?.invoke(newValue)
     }
 
     private fun switchLauncherAlias(calcMode: Boolean) {

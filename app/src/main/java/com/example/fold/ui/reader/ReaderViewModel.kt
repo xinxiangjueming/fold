@@ -79,6 +79,8 @@ class ReaderViewModel : ViewModel() {
     private var userMarginRight = prefs.getFloat(KEY_MARGIN_RIGHT, 20f)
     private var userReSegment = prefs.getBoolean(KEY_RE_SEGMENT, false)
     private var userChineseConvert = prefs.getInt(KEY_CHINESE_CONVERT, 0)
+    private var userVolumePageTurn = prefs.getBoolean(KEY_VOLUME_PAGE_TURN, false)
+    private var userStealthMode = prefs.getBoolean(KEY_STEALTH_MODE, false)
 
     init {
         FoldLogger.i(TAG, "init: fontPath='$userFontPath', fontSize=$userFontSize, lineSpacing=$userLineSpacing, theme=$userThemeName")
@@ -95,7 +97,9 @@ class ReaderViewModel : ViewModel() {
                 marginLeft = userMarginLeft,
                 marginRight = userMarginRight,
                 reSegment = userReSegment,
-                chineseConvert = userChineseConvert
+                chineseConvert = userChineseConvert,
+                volumePageTurn = userVolumePageTurn,
+                stealthMode = userStealthMode
             )
         }
         // 监听通知栏 TTS 控制事件
@@ -179,6 +183,8 @@ class ReaderViewModel : ViewModel() {
                             wordReplacements = cur.wordReplacements,
                             reSegment = cur.reSegment,
                             chineseConvert = cur.chineseConvert,
+                            volumePageTurn = cur.volumePageTurn,
+                            stealthMode = cur.stealthMode,
                             currentChapterIndex = if (wasNew) savedChapter else cur.currentChapterIndex,
                             currentScrollOffset = if (wasNew) savedScroll else cur.currentScrollOffset
                         )
@@ -200,6 +206,8 @@ class ReaderViewModel : ViewModel() {
                             wordReplacements = cur.wordReplacements,
                             reSegment = cur.reSegment,
                             chineseConvert = cur.chineseConvert,
+                            volumePageTurn = cur.volumePageTurn,
+                            stealthMode = cur.stealthMode,
                             currentChapterIndex = if (cur.filePath != filePath) savedChapter else cur.currentChapterIndex
                         )
                     }
@@ -219,6 +227,8 @@ class ReaderViewModel : ViewModel() {
                             wordReplacements = cur.wordReplacements,
                             reSegment = cur.reSegment,
                             chineseConvert = cur.chineseConvert,
+                            volumePageTurn = cur.volumePageTurn,
+                            stealthMode = cur.stealthMode,
                             currentPage = if (cur.filePath != filePath) savedChapter else cur.currentPage
                         )
                     }
@@ -460,6 +470,33 @@ class ReaderViewModel : ViewModel() {
         prefs.edit().putInt(KEY_CHINESE_CONVERT, next).apply()
     }
 
+    // ===== 音量键翻页 =====
+
+    /** 切换音量键翻页 */
+    fun toggleVolumePageTurn() {
+        val newValue = !_state.value.volumePageTurn
+        FoldLogger.d(TAG, "toggleVolumePageTurn: volumePageTurn=$newValue")
+        _state.update { it.copy(volumePageTurn = newValue) }
+        prefs.edit().putBoolean(KEY_VOLUME_PAGE_TURN, newValue).apply()
+    }
+
+    // ===== 息屏归隐 =====
+
+    /** 切换息屏归隐 */
+    fun toggleStealthMode() {
+        val newValue = !_state.value.stealthMode
+        FoldLogger.d(TAG, "toggleStealthMode: stealthMode=$newValue")
+        _state.update { it.copy(stealthMode = newValue) }
+        prefs.edit().putBoolean(KEY_STEALTH_MODE, newValue).apply()
+    }
+
+    /** 息屏归隐：保存当前滚动位置 */
+    fun onScreenOff() {
+        val s = _state.value
+        FoldLogger.i(TAG, "onScreenOff: saving progress, chapter=${s.currentChapterIndex}, scroll=${s.currentScrollOffset}")
+        saveProgress(s.currentChapterIndex, s.currentScrollOffset)
+    }
+
     /** 获取章节文本：如果开启重新分段则返回段落列表，否则返回单元素列表 */
     fun getProcessedChapterParagraphs(index: Int): List<String> {
         val raw = getTxtChapterText(index)
@@ -626,5 +663,7 @@ class ReaderViewModel : ViewModel() {
         private const val KEY_MARGIN_RIGHT = "margin_right"
         private const val KEY_RE_SEGMENT = "re_segment"
         private const val KEY_CHINESE_CONVERT = "chinese_convert"
+        private const val KEY_VOLUME_PAGE_TURN = "volume_page_turn"
+        private const val KEY_STEALTH_MODE = "stealth_mode"
     }
 }
