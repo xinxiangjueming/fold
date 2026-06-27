@@ -93,26 +93,56 @@ class UsbExclusiveAudioSink(
     }
 
     override fun play() {
-        android.util.Log.i("UsbSink", "play() called, encoding=$encoding usbBitDepth=$usbBitDepth")
-        /* 先安全停止旧的 ISO 传输（防止连续 play() 调用） */
-        usbAudio.stopPlayback()
-        isPlaying = true
-        /* 启动 ISO 传输——此时 handleBuffer 可以接收数据了 */
-        val result = usbAudio.startPlayback(sampleRate, usbBitDepth, usbChannels)
-        if (result < 0) {
-            android.util.Log.e("UsbSink", "startPlayback failed: $result, cleaning up")
-            isPlaying = false
+        android.util.Log.i("UsbSink", "play() called, encoding=$encoding usbBitDepth=$usbBitDepth, usbStarted=$usbStarted")
+        if (usbStarted) {
+            /* USB 已由 auto-start 启动，不要重启（会清空 ring buffer） */
+            isPlaying = true
+        } else {
             usbAudio.stopPlayback()
+            isPlaying = true
+            val result = usbAudio.startPlayback(sampleRate, usbBitDepth, usbChannels)
+            if (result < 0) {
+                android.util.Log.e("UsbSink", "startPlayback failed: $result, cleaning up")
+                isPlaying = false
+                usbAudio.stopPlayback()
+            } else {
+                usbStarted = true
+            }
         }
     }
+
+    private var bufferCount = 0L
+    private var lastBufferLogMs = 0L
+    private var usbStarted = false
 
     @Throws(AudioSink.InitializationException::class, AudioSink.WriteException::class)
     override fun handleBuffer(buffer: ByteBuffer, presentationTimeUs: Long, encodedAccessUnitCount: Int): Boolean {
         val remaining = buffer.remaining()
-        if (remaining <= 0) return false
+        if (remaining <= 0) {
+            android.util.Log.w("UsbSink", "handleBuffer: empty buffer (remaining=0)")
+            return false
+        }
 
-        if (submittedFrames == 0L) {
-            android.util.Log.i("UsbSink", "First PCM buffer: $remaining bytes, encoding=$encoding usbBitDepth=$usbBitDepth")
+        /* 首次收到数据时自动启动 USB 传输（ExoPlayer 可能不调用 play()） */
+        if (!usbStarted) {
+            android.util.Log.i("UsbSink", "Auto-starting USB on first handleBuffer")
+            usbAudio.stopPlayback()
+            val result = usbAudio.startPlayback(sampleRate, usbBitDepth, usbChannels)
+            if (result < 0) {
+                android.util.Log.e("UsbSink", "Auto-start failed: $result")
+                return false
+            }
+            usbStarted = true
+            isPlaying = true
+        }
+
+        bufferCount++
+        val now = android.os.SystemClock.uptimeMillis()
+        if (bufferCount <= 5 || now - lastBufferLogMs > 2000) {
+            android.util.Log.i("UsbSink", "handleBuffer #$bufferCount: ${remaining}bytes, " +
+                "pts=${presentationTimeUs}us, frames=$submittedFrames, " +
+                "pos=${submittedFrames * 1000 / sampleRate}ms")
+            lastBufferLogMs = now
         }
 
         val pcmData = ByteArray(remaining)
@@ -134,13 +164,13 @@ class UsbExclusiveAudioSink(
     override fun handleDiscontinuity() {}
     override fun getCurrentPositionUs(sourceEnded: Boolean): Long {
         val sr = sampleRate
-        val frames = submittedFrames
         if (sr <= 0) return C.TIME_UNSET
-        // 当还没有数据流入时，返回 TIME_UNSET 让 ExoPlayer 用解码器的 PTS 作为位置
-        // 否则 renderer 会认为 sink 位置=0 并停止发送数据
-        if (frames <= 0L) return C.TIME_UNSET
+        // 用 USB 实际消费的帧数计算位置（而非 submittedFrames）
+        // 这样 ExoPlayer 看到的是真实播放位置，不会过度节流解码器
+        val consumed = usbAudio.getConsumedFrames()
+        if (consumed <= 0L) return C.TIME_UNSET
         return try {
-            (frames * 1_000_000L / sr).coerceAtLeast(0L)
+            (consumed * 1_000_000L / sr).coerceAtLeast(0L)
         } catch (_: Exception) {
             C.TIME_UNSET
         }
@@ -160,9 +190,18 @@ class UsbExclusiveAudioSink(
     override fun disableTunneling() {}
     override fun setVolume(volume: Float) {}
 
-    override fun pause() { isPlaying = false; usbAudio.stopPlayback() }
-    override fun flush() { isPlaying = false; submittedFrames = 0; usbAudio.stopPlayback() }
-    override fun reset() { isPlaying = false; submittedFrames = 0; usbAudio.stopPlayback() }
+    override fun pause() {
+        android.util.Log.w("UsbSink", "pause() called, submittedFrames=$submittedFrames")
+        isPlaying = false; usbStarted = false; usbAudio.stopPlayback()
+    }
+    override fun flush() {
+        android.util.Log.w("UsbSink", "flush() called, submittedFrames=$submittedFrames")
+        isPlaying = false; submittedFrames = 0; bufferCount = 0; usbStarted = false; usbAudio.stopPlayback()
+    }
+    override fun reset() {
+        android.util.Log.w("UsbSink", "reset() called, submittedFrames=$submittedFrames")
+        isPlaying = false; submittedFrames = 0; bufferCount = 0; usbStarted = false; usbAudio.stopPlayback()
+    }
     override fun release() { reset() }
 
     /* ── 格式转换 ── */

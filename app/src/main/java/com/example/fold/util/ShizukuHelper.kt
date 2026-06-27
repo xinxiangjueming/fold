@@ -199,12 +199,20 @@ object ShizukuHelper {
 
     suspend fun listRestrictedDir(path: String): Result<List<RestrictedFileInfo>> {
         Log.d(TAG, "listRestrictedDir: $path")
-        return exec("ls -la '$path'").map { output ->
-            output.lines()
-                .filter { it.isNotBlank() && !it.startsWith("total") }
-                .mapNotNull { parseLsLine(it, path) }
-                .also { Log.d(TAG, "listRestrictedDir: ${it.size} items") }
+        // 优先用 stat（toybox 内置，输出格式稳定），回退到 ls -la
+        val output = exec("stat -c '%A %s %n' '$path/*' 2>/dev/null").getOrNull()
+        val lines = if (!output.isNullOrBlank()) {
+            output.lines().filter { it.isNotBlank() }
+        } else {
+            exec("ls -la '$path'").getOrNull()?.lines()
+                ?.filter { it.isNotBlank() && !it.startsWith("total") }
+                ?: emptyList()
         }
+        val useStat = !output.isNullOrBlank()
+        return Result.success(
+            lines.mapNotNull { if (useStat) parseStatLine(it, path) else parseLsLine(it, path) }
+                .also { Log.d(TAG, "listRestrictedDir: ${it.size} items (useStat=$useStat)") }
+        )
     }
 
     suspend fun deleteRestricted(path: String): Result<Unit> {
@@ -225,7 +233,30 @@ object ShizukuHelper {
         return result
     }
 
-    // ---- 解析 ls 输出 ----
+    // ---- 解析 stat 输出 ----
+    // stat -c '%A %s %n' 输出: "drwxr-xr-x 4096 /path/to/dir"
+    private fun parseStatLine(line: String, parentPath: String): RestrictedFileInfo? {
+        val trimmed = line.trim()
+        if (trimmed.length < 4) return null
+        val firstSpace = trimmed.indexOf(' ')
+        val secondSpace = trimmed.indexOf(' ', firstSpace + 1)
+        if (firstSpace < 0 || secondSpace < 0) return null
+        val perms = trimmed.substring(0, firstSpace)
+        val sizeStr = trimmed.substring(firstSpace + 1, secondSpace).trim()
+        val name = trimmed.substring(secondSpace + 1).trim()
+        if (name.isEmpty() || name == "." || name == "..") return null
+        val isDir = perms.startsWith("d")
+        return RestrictedFileInfo(
+            name = name.substringAfterLast('/'),
+            path = name,
+            isDirectory = isDir,
+            size = if (isDir) 0L else sizeStr.toLongOrNull() ?: 0L,
+            lastModified = 0L,
+            extension = if (isDir) "" else name.substringAfterLast('.', "").lowercase()
+        )
+    }
+
+    // ---- 解析 ls 输出（回退） ----
     private fun parseLsLine(line: String, parentPath: String): RestrictedFileInfo? {
         val parts = line.trim().split(Regex("\\s+"))
         if (parts.size < 7) return null

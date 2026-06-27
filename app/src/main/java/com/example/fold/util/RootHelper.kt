@@ -33,7 +33,8 @@ object RootHelper {
         try {
             val process = Runtime.getRuntime().exec("su")
             val os = DataOutputStream(process.outputStream)
-            os.writeBytes("ls -la '$path'\n")
+            // 优先用 stat（输出格式稳定），回退到 ls -la
+            os.writeBytes("stat -c '%A %s %n' '$path'/* 2>/dev/null || ls -la '$path'\n")
             os.writeBytes("exit\n")
             os.flush()
 
@@ -43,9 +44,13 @@ object RootHelper {
 
             if (exitCode != 0) return@withContext Result.failure(Exception("root ls failed: exit=$exitCode"))
 
-            val files = output.lines()
-                .filter { it.isNotEmpty() && !it.startsWith("total ") }
-                .mapNotNull { parseLsLine(it, path) }
+            val lines = output.lines().filter { it.isNotBlank() && !it.startsWith("total ") }
+            val useStat = lines.firstOrNull()?.let { line ->
+                val parts = line.trim().split(Regex("\\s+"), limit = 3)
+                parts.size == 3 && parts[0].length >= 9 && parts[0].startsWith("d") || parts[0].startsWith("-")
+            } == true
+
+            val files = lines.mapNotNull { if (useStat) parseStatLine(it, path) else parseLsLine(it, path) }
 
             Result.success(files)
         } catch (e: Exception) {
@@ -72,6 +77,27 @@ object RootHelper {
             Log.e(TAG, "readFile failed: $path", e)
             Result.failure(e)
         }
+    }
+
+    private fun parseStatLine(line: String, parentPath: String): FileItem? {
+        val trimmed = line.trim()
+        if (trimmed.length < 4) return null
+        val firstSpace = trimmed.indexOf(' ')
+        val secondSpace = trimmed.indexOf(' ', firstSpace + 1)
+        if (firstSpace < 0 || secondSpace < 0) return null
+        val perms = trimmed.substring(0, firstSpace)
+        val sizeStr = trimmed.substring(firstSpace + 1, secondSpace).trim()
+        val name = trimmed.substring(secondSpace + 1).trim().substringAfterLast('/')
+        if (name.isEmpty() || name == "." || name == "..") return null
+        val isDir = perms.startsWith("d")
+        return FileItem(
+            name = name,
+            path = "$parentPath/$name",
+            isDirectory = isDir,
+            size = if (isDir) 0L else sizeStr.toLongOrNull() ?: 0L,
+            lastModifiedTimestamp = 0L,
+            extension = if (isDir) "" else name.substringAfterLast('.', "").lowercase()
+        )
     }
 
     private fun parseLsLine(line: String, parentPath: String): FileItem? {

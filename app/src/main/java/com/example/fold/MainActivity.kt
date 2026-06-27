@@ -107,6 +107,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onPause() {
+        super.onPause()
+        // 释放空闲超过 5 分钟的 reader，避免后台资源泄漏
+        AppContainer.releaseIdleReader()
+    }
+
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         val isVolume = keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
         FoldLogger.d(TAG, "onKeyDown: keyCode=$keyCode, isVolume=$isVolume, readerActive=$readerActive")

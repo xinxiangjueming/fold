@@ -22,6 +22,7 @@ import androidx.compose.runtime.*
 import top.yukonga.miuix.kmp.basic.Slider as MiuixSlider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -83,7 +84,7 @@ fun AudioPlayerScreen(
     // USB 独占模式状态
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
-    var isExclusive by remember { mutableStateOf(MusicPlayerHolder.isExclusiveMode) }
+    val isExclusive by MusicPlayerHolder.isExclusiveMode
     var exclusiveLabel by remember { mutableStateOf("") }
 
     Column(
@@ -234,7 +235,6 @@ fun AudioPlayerScreen(
                     // 切换模式 + 释放旧 player
                     MusicPlayerHolder.enableExclusiveMode(context, device, format)
                     MusicPlayerHolder.releasePlayer()
-                    isExclusive = true
                     exclusiveLabel = "${device.productName} ${format.label}"
                     // ViewModel 重新 init → getOrCreate 创建独占 player
                     vm.init(filePath, state.playlistPaths)
@@ -245,7 +245,6 @@ fun AudioPlayerScreen(
             onDisable = {
                 MusicPlayerHolder.disableExclusiveMode(context)
                 MusicPlayerHolder.releasePlayer()
-                isExclusive = false
                 exclusiveLabel = ""
                 // ViewModel 重新 init → getOrCreate 创建普通 player
                 vm.init(filePath, state.playlistPaths)
@@ -330,7 +329,8 @@ private fun IndependentProgressBar(
     duration: Long,
     onSeek: (Long) -> Unit
 ) {
-    if (duration <= 0) return
+    // 始终渲染占位，避免 duration 从 0→实际值时布局抖动
+    val effectiveDuration = if (duration > 0) duration else 30000L
 
     var isDragging by remember { mutableStateOf(false) }
     var dragPosition by remember { mutableStateOf(0L) }
@@ -350,18 +350,20 @@ private fun IndependentProgressBar(
     val pos = if (isDragging) dragPosition else displayPos
 
     MiuixSlider(
-        value = pos.toFloat(),
+        value = if (duration > 0) pos.toFloat() else 0f,
         onValueChange = { isDragging = true; dragPosition = it.toLong() },
         onValueChangeFinished = {
-            displayPos = dragPosition
-            onSeek(dragPosition)
+            if (duration > 0) {
+                displayPos = dragPosition
+                onSeek(dragPosition)
+            }
             isDragging = false
         },
-        valueRange = 0f..duration.toFloat(),
-        modifier = Modifier.fillMaxWidth(),
+        valueRange = 0f..effectiveDuration.toFloat(),
+        modifier = Modifier.fillMaxWidth().alpha(if (duration > 0) 1f else 0.3f),
     )
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(formatTime(pos), style = MaterialTheme.typography.bodySmall,
+        Text(formatTime(if (duration > 0) pos else 0), style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(formatTime(duration), style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)

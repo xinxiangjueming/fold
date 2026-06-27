@@ -332,21 +332,8 @@ object AppHider {
             }
         }
 
-        // 4. 启动成功后等待 app 加载再重新隐藏
-        if (started) Thread.sleep(2000)
-
-        // 5. 重新隐藏
-        when (method) {
-            HideMethod.ROOT -> {
-                if (wasSuspended) execCmdRoot("cmd package suspend --user 0 $packageName")
-                else execCmdRoot("pm disable-user --user 0 $packageName")
-            }
-            HideMethod.SHIZUKU -> {
-                if (wasSuspended) ShizukuHelper.exec("cmd package suspend --user 0 $packageName")
-                else ShizukuHelper.exec("pm disable-user --user 0 $packageName")
-            }
-            else -> {}
-        }
+        // 4. 启动后不重新隐藏——suspend/disable 都会杀死正在运行的进程
+        //    用户返回 fold 后可手动重新隐藏
 
         if (started) FoldLogger.i(TAG, "launchApp: $packageName launched successfully")
         else FoldLogger.e(TAG, "launchApp: failed for $packageName")
@@ -465,13 +452,19 @@ object AppHider {
         return getPrefs(context).getString("name_$packageName", null) ?: packageName
     }
 
+    private fun getIconDir(context: Context): java.io.File {
+        val dir = java.io.File(context.filesDir, "hidden_icons")
+        if (!dir.exists()) dir.mkdirs()
+        return dir
+    }
+
     private fun saveIconToPrefs(context: Context, packageName: String, drawable: Drawable) {
         try {
             val bitmap = drawableToBitmap(drawable)
-            val baos = ByteArrayOutputStream()
-            bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
-            val base64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
-            getPrefs(context).edit().putString("icon_$packageName", base64).apply()
+            val file = java.io.File(getIconDir(context), "$packageName.png")
+            file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            // 迁移：删除旧的 SP 存储
+            getPrefs(context).edit().remove("icon_$packageName").apply()
         } catch (e: Exception) {
             FoldLogger.w(TAG, "saveIconToPrefs failed for $packageName: ${e.message}")
         }
@@ -479,9 +472,18 @@ object AppHider {
 
     private fun loadIconFromPrefs(context: Context, packageName: String): Drawable? {
         return try {
+            // 优先从文件加载
+            val file = java.io.File(getIconDir(context), "$packageName.png")
+            if (file.exists()) {
+                val bitmap = BitmapFactory.decodeFile(file.absolutePath) ?: return null
+                return BitmapDrawable(context.resources, bitmap)
+            }
+            // 回退：从 SP 迁移（兼容旧版本）
             val base64 = getPrefs(context).getString("icon_$packageName", null) ?: return null
             val bytes = Base64.decode(base64, Base64.NO_WRAP)
             val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+            // 迁移到文件
+            saveIconToPrefs(context, packageName, BitmapDrawable(context.resources, bitmap))
             BitmapDrawable(context.resources, bitmap)
         } catch (e: Exception) {
             FoldLogger.w(TAG, "loadIconFromPrefs failed for $packageName: ${e.message}")

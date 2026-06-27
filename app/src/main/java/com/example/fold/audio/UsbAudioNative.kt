@@ -35,6 +35,7 @@ class UsbAudioNative(private val context: Context) {
     external fun nativeStop()
     external fun nativeGetUnderrunCount(): Int
     external fun nativeGetSampleRate(): Int
+    external fun nativeGetConsumedFrames(): Long
     external fun nativeRelease()
 
     /* ── 设备发现 ── */
@@ -179,6 +180,7 @@ class UsbAudioNative(private val context: Context) {
     fun writePcm(data: ByteArray, offset: Int, length: Int): Int = nativeWritePcm(data, offset, length)
     fun stopPlayback() = nativeStop()
     fun getUnderrunCount(): Int = nativeGetUnderrunCount()
+    fun getConsumedFrames(): Long = nativeGetConsumedFrames()
     fun release() {
         nativeRelease()
         usbConnection?.close()

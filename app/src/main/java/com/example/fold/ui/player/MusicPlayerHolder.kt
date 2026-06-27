@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import androidx.compose.runtime.mutableStateOf
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -35,7 +36,7 @@ object MusicPlayerHolder {
         private set
     var exclusiveFormat: UsbAudioNative.AudioFormat? = null
         private set
-    var isExclusiveMode: Boolean = false
+    var isExclusiveMode = mutableStateOf(false)
         private set
 
     /**
@@ -45,7 +46,7 @@ object MusicPlayerHolder {
 
     fun getOrCreate(context: Context): ExoPlayer {
         if (exoPlayer == null) {
-            exoPlayer = if (isExclusiveMode && usbAudio != null) {
+            exoPlayer = if (isExclusiveMode.value && usbAudio != null) {
                 buildExclusivePlayer(context)
             } else {
                 buildNormalPlayer(context)
@@ -86,7 +87,7 @@ object MusicPlayerHolder {
         val ua = usbAudio ?: return false
         exclusiveDevice = device
         exclusiveFormat = format
-        isExclusiveMode = true
+        isExclusiveMode.value = true
         return true
     }
 
@@ -95,7 +96,7 @@ object MusicPlayerHolder {
      * 只设置标志 — 调用方负责释放旧 player 并重新 init
      */
     fun disableExclusiveMode(context: Context) {
-        isExclusiveMode = false
+        isExclusiveMode.value = false
         exclusiveDevice = null
         exclusiveFormat = null
         usbAudio?.release()
@@ -136,7 +137,7 @@ object MusicPlayerHolder {
         playlist = emptyList()
         usbAudio?.release()
         usbAudio = null
-        isExclusiveMode = false
+        isExclusiveMode.value = false
         exclusiveDevice = null
         exclusiveFormat = null
         MiniPlayerState.clear()

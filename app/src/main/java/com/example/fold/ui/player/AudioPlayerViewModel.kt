@@ -254,11 +254,21 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
     // ===== 播放控制 =====
 
-    fun togglePlay() { if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play() }
-    fun prev() { if (exoPlayer.hasPreviousMediaItem()) exoPlayer.seekToPrevious() else exoPlayer.seekTo(0) }
-    fun next() { if (exoPlayer.hasNextMediaItem()) exoPlayer.seekToNext() else exoPlayer.seekTo(0) }
-    fun seekTo(position: Long) { exoPlayer.seekTo(position) }
-    fun seekToIndex(index: Int) { exoPlayer.seekTo(index, 0); exoPlayer.play() }
+    /** 检查 player 是否被外部销毁（如 USB 拔出），自动重建 */
+    private fun ensurePlayer() {
+        if (!MusicPlayerHolder.isActive()) {
+            android.util.Log.w("AudioPlayer", "Player was destroyed, recreating")
+            exoPlayer = MusicPlayerHolder.getOrCreate(context)
+            MusicPlayerHolder.loadPlaylist(context, resolvedPlaylist, _state.value.currentIndex)
+            attachListeners()
+        }
+    }
+
+    fun togglePlay() { ensurePlayer(); if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play() }
+    fun prev() { ensurePlayer(); if (exoPlayer.hasPreviousMediaItem()) exoPlayer.seekToPrevious() else exoPlayer.seekTo(0) }
+    fun next() { ensurePlayer(); if (exoPlayer.hasNextMediaItem()) exoPlayer.seekToNext() else exoPlayer.seekTo(0) }
+    fun seekTo(position: Long) { ensurePlayer(); exoPlayer.seekTo(position) }
+    fun seekToIndex(index: Int) { ensurePlayer(); exoPlayer.seekTo(index, 0); exoPlayer.play() }
 
     fun cycleLoopMode() {
         val newMode = (_state.value.loopMode + 1) % 3

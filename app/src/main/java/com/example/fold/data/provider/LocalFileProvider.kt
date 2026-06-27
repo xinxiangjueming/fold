@@ -12,21 +12,45 @@ import java.io.OutputStream
 class LocalFileProvider : FileProvider {
 
     // 目录列表缓存，避免低速存储设备重复读取
+    // 限制：最多 32 个目录 + 总数据量不超过 ~2MB
+    private var listCacheSizeBytes = 0L
     private val listCache = object : LinkedHashMap<String, List<FileItem>>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<FileItem>>): Boolean = size > 32
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<FileItem>>): Boolean {
+            val tooMany = size > 32
+            val tooLarge = listCacheSizeBytes > 2_000_000
+            if ((tooMany || tooLarge) && eldest.value != null) {
+                listCacheSizeBytes -= estimateSize(eldest.value)
+                return true
+            }
+            return false
+        }
     }
+    private var fastCacheSizeBytes = 0L
     private val fastCache = object : LinkedHashMap<String, List<FileItem>>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<FileItem>>): Boolean = size > 32
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<FileItem>>): Boolean {
+            val tooMany = size > 32
+            val tooLarge = fastCacheSizeBytes > 2_000_000
+            if ((tooMany || tooLarge) && eldest.value != null) {
+                fastCacheSizeBytes -= estimateSize(eldest.value)
+                return true
+            }
+            return false
+        }
+    }
+
+    private fun estimateSize(items: List<FileItem>): Long {
+        // 每个 FileItem 约 200 字节（name + path + overhead）
+        return items.size * 200L
     }
 
     fun invalidateCache(path: String) {
-        listCache.remove(path)
-        fastCache.remove(path)
+        listCache.remove(path)?.let { listCacheSizeBytes -= estimateSize(it) }
+        fastCache.remove(path)?.let { fastCacheSizeBytes -= estimateSize(it) }
     }
 
     fun clearAllCaches() {
-        listCache.clear()
-        fastCache.clear()
+        listCache.clear(); listCacheSizeBytes = 0
+        fastCache.clear(); fastCacheSizeBytes = 0
     }
 
     override suspend fun listFiles(path: String): List<FileItem> = withContext(Dispatchers.IO) {
@@ -48,6 +72,7 @@ class LocalFileProvider : FileProvider {
             ?: emptyList()
 
         listCache[path] = result
+        listCacheSizeBytes += estimateSize(result)
         result
     }
 
@@ -82,6 +107,7 @@ class LocalFileProvider : FileProvider {
         }.sortedWith(compareByDescending<FileItem> { it.isDirectory }.thenBy { it.name.lowercase() })
 
         fastCache[path] = result
+        fastCacheSizeBytes += estimateSize(result)
         result
     }
 

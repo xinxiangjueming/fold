@@ -17,8 +17,10 @@
 #include <sched.h>
 #include <time.h>
 #include <unistd.h>
+#include <dlfcn.h>
 #include <android/log.h>
 #include <libusb.h>
+#include <sys/resource.h>
 
 #define TAG "UsbAudioNative"
 #define LOGI(...) do { __android_log_print(ANDROID_LOG_INFO,  TAG, __VA_ARGS__); file_log("I", __VA_ARGS__); } while(0)
@@ -102,8 +104,8 @@ static void file_log_close(void) {
 #define UAC2_CLOCK_SOURCE          0x0A
 
 /* ── Isochronous 传输参数 ── */
-#define NUM_ISO_TRANSFERS    4      /* 同时提交的 transfer 数量 */
-#define PACKETS_PER_TRANSFER 8      /* 每个 transfer 包含的 packet 数 */
+#define NUM_ISO_TRANSFERS    8      /* 同时提交的 transfer 数量（内核用16+） */
+#define PACKETS_PER_TRANSFER 16     /* 每个 transfer 包含的 packet 数（1微帧=125μs） */
 #define MAX_PACKET_SIZE      1024   /* 单个 iso packet 最大字节数 */
 
 /* ── PCM ring buffer ── */
@@ -159,11 +161,16 @@ typedef struct {
     int is_playing;
     int underrun_count;
 
+    /* USB 消费计数（供 Kotlin 层读取播放位置） */
+    int64_t consumed_frames;     /* ISO 回调已消费的总帧数 */
+
     /* 自适应 buffer 管理 */
     int prebuffer_bytes;         /* 动态调整的预填充阈值（字节） */
     int consecutive_underruns;   /* 连续 underrun 计数 */
     int consecutive_ok;          /* 连续正常计数 */
     int ring_watermark;          /* 最低 ring buffer 水位记录 */
+    int prebuffered;             /* 是否已完成预填充（0=还在预填充，1=正在播放） */
+    int silence_count;           /* 预填充期间发送的静音帧数 */
 
 } UsbAudioState;
 
@@ -180,7 +187,13 @@ static void ring_reset(void) {
 }
 
 static int ring_write(const uint8_t *data, int len) {
+    /* 先检查再锁，避免 release 后访问已销毁的 mutex */
+    if (!g_state.ring_buffer) return 0;
     pthread_mutex_lock(&g_state.ring_mutex);
+    if (!g_state.ring_buffer) {
+        pthread_mutex_unlock(&g_state.ring_mutex);
+        return 0;
+    }
     int space = RING_BUFFER_SIZE - g_state.ring_available;
     int to_write = (len < space) ? len : space;
     int written = 0;
@@ -193,12 +206,33 @@ static int ring_write(const uint8_t *data, int len) {
         g_state.ring_available += chunk;
         written += chunk;
     }
+    int avail_after = g_state.ring_available;
     pthread_mutex_unlock(&g_state.ring_mutex);
+
+    /* 每 2 秒打印一次写入状态 */
+    static int write_call_count = 0;
+    static struct timespec last_write_log = {0};
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    write_call_count++;
+    if (write_call_count <= 3 || (now.tv_sec - last_write_log.tv_sec) >= 2) {
+        LOGI("ring_write: %d/%d bytes, avail=%d (%d ms), calls=%d",
+             written, len, avail_after,
+             avail_after * 1000 / (g_state.sample_rate * g_state.frame_size + 1),
+             write_call_count);
+        last_write_log = now;
+        write_call_count = 0;
+    }
+
     return written;
 }
 
 /* 返回实际读取的字节数（不含零填充部分），用于 underrun 检测 */
 static int ring_read(uint8_t *dest, int len) {
+    if (!g_state.ring_buffer) {
+        memset(dest, 0, len);
+        return 0;
+    }
     pthread_mutex_lock(&g_state.ring_mutex);
     int avail = g_state.ring_available;
     int to_read = (len < avail) ? len : avail;
@@ -223,15 +257,31 @@ static int ring_read(uint8_t *dest, int len) {
 /* ── libusb event 处理线程 ── */
 
 static void *event_thread_func(void *arg) {
-    /* 设置实时调度优先级，减少 GC/系统调度导致的 ISO 传输抖动
-     * SCHED_FIFO + 高优先级确保 USB 音频线程不被普通线程抢占 */
-    struct sched_param param;
-    int max_prio = sched_get_priority_max(SCHED_FIFO);
-    param.sched_priority = max_prio > 10 ? max_prio - 10 : max_prio;
-    if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &param) == 0) {
-        LOGI("Event thread: SCHED_FIFO priority=%d", param.sched_priority);
+    /*
+     * 设置线程优先级。
+     * SCHED_FIFO 需要 CAP_SYS_NICE（root），Android 上通常不可用。
+     * 改用 androidSetThreadPriority 设置较低优先级（nice=-4），
+     * 让 ExoPlayer 解码器线程有更高调度优先权，确保数据持续供应。
+     * THREAD_PRIORITY_AUDIO = -16 太高，会和解码器抢 CPU。
+     */
+    typedef int (*android_set_thread_priority_fn)(int, int);
+    android_set_thread_priority_fn set_prio =
+        (android_set_thread_priority_fn)dlsym(RTLD_DEFAULT, "androidSetThreadPriority");
+    if (set_prio) {
+        /* tid=0 表示当前线程, -4 = 比普通线程高但低于解码器 */
+        int ret = set_prio(0, -4);
+        if (ret == 0) {
+            LOGI("Event thread: androidSetThreadPriority(-4) OK");
+        } else {
+            LOGW("Event thread: androidSetThreadPriority failed: %d", ret);
+        }
     } else {
-        LOGW("Event thread: failed to set SCHED_FIFO (need CAP_SYS_NICE), continuing with default priority");
+        /* fallback: 尝试 setpriority (可能因权限失败) */
+        if (setpriority(PRIO_PROCESS, 0, -4) == 0) {
+            LOGI("Event thread: setpriority(-4) OK");
+        } else {
+            LOGW("Event thread: failed to set priority (need CAP_SYS_NICE), using default");
+        }
     }
 
     LOGI("Event thread started");
@@ -357,54 +407,91 @@ static void LIBUSB_CALL iso_callback(struct libusb_transfer *transfer) {
                 total_size += this_pkt_size;
             }
 
-            /*
-             * 直接从 ring buffer 读取数据。
-             * ring_read() 在数据不足时自动填零，不需要额外的预填充检查。
-             * 这避免了 "avail < prebuffer → 发静音 → 永远无法开始播放" 的问题。
-             * prebuffer_bytes 仅用于下次播放启动时的初始延迟判断。
-             */
-            int actual = ring_read(buf, total_size);
-
-            /* 记录最低水位 */
+            /* 检查 ring buffer 水位 */
             pthread_mutex_lock(&g_state.ring_mutex);
             int avail = g_state.ring_available;
             pthread_mutex_unlock(&g_state.ring_mutex);
+
+            /* 记录最低水位 */
             if (avail < g_state.ring_watermark) {
                 g_state.ring_watermark = avail;
             }
 
-            if (actual < total_size) {
-                /* 数据不足 = underrun */
-                g_state.underrun_count++;
-                g_state.consecutive_underruns++;
-                g_state.consecutive_ok = 0;
-
-                /* 连续 underrun 时增加预填充阈值（下次播放用） */
-                if (g_state.consecutive_underruns >= 5) {
-                    int max_prebuf = g_state.sample_rate * g_state.frame_size / 5;
-                    g_state.prebuffer_bytes = (g_state.prebuffer_bytes * 3 / 2 < max_prebuf)
-                        ? g_state.prebuffer_bytes * 3 / 2 : max_prebuf;
-                    LOGW("Adaptive buffer: increased prebuffer to %d bytes (%d ms), "
-                         "consecutive underruns=%d",
-                         g_state.prebuffer_bytes,
-                         g_state.prebuffer_bytes * 1000 / (g_state.sample_rate * g_state.frame_size),
-                         g_state.consecutive_underruns);
-                    g_state.consecutive_underruns = 0;
+            /*
+             * Prebuffer 门控：数据不足时发静音，保持 USB 时钟活跃。
+             * 两种情况触发：
+             *   1. 首次启动，buffer 未蓄满
+             *   2. 播放中持续 underrun，需要重新蓄 buffer（re-prebuffer）
+             */
+            if (avail < g_state.prebuffer_bytes && !g_state.prebuffered) {
+                memset(buf, 0, total_size);
+                g_state.silence_count++;
+                if (g_state.silence_count <= 5 || g_state.silence_count % 200 == 1) {
+                    LOGI("Prebuffering: avail=%d/%d bytes (%d ms/%d ms), write_pos=%d read_pos=%d, silence#%d",
+                         avail, g_state.prebuffer_bytes,
+                         avail * 1000 / (g_state.sample_rate * g_state.frame_size + 1),
+                         g_state.prebuffer_bytes * 1000 / (g_state.sample_rate * g_state.frame_size + 1),
+                         g_state.ring_write_pos, g_state.ring_read_pos, g_state.silence_count);
                 }
             } else {
-                g_state.consecutive_underruns = 0;
-                g_state.consecutive_ok++;
+                if (!g_state.prebuffered) {
+                    LOGI("Prebuffer gate OPEN: avail=%d >= %d, starting real playback",
+                         avail, g_state.prebuffer_bytes);
+                }
+                g_state.prebuffered = 1;
+                int actual = ring_read(buf, total_size);
 
-                /* 稳定运行后，逐步降低预填充阈值（下次播放用） */
-                if (g_state.consecutive_ok >= 500) {
-                    int min_prebuf = g_state.sample_rate * g_state.frame_size / 50;
-                    if (g_state.prebuffer_bytes > min_prebuf) {
-                        g_state.prebuffer_bytes = g_state.prebuffer_bytes * 9 / 10;
-                        LOGI("Adaptive buffer: decreased prebuffer to %d bytes (%d ms)",
-                             g_state.prebuffer_bytes,
-                             g_state.prebuffer_bytes * 1000 / (g_state.sample_rate * g_state.frame_size));
-                    }
+                /* 每 500 次成功读取打印一次 */
+                if (actual == total_size && g_state.consecutive_ok % 500 == 1) {
+                    pthread_mutex_lock(&g_state.ring_mutex);
+                    int remaining = g_state.ring_available;
+                    pthread_mutex_unlock(&g_state.ring_mutex);
+                    LOGI("ISO read OK: %d bytes, remaining=%d (%d ms), ok#%d",
+                         actual, remaining,
+                         remaining * 1000 / (g_state.sample_rate * g_state.frame_size + 1),
+                         g_state.consecutive_ok);
+                }
+
+                if (actual < total_size) {
+                    /* 数据不足 = underrun */
+                    g_state.underrun_count++;
+                    g_state.consecutive_underruns++;
                     g_state.consecutive_ok = 0;
+
+                    /* 连续 underrun：提高阈值 + 重置 prebuffered 进入 re-prebuffer */
+                    if (g_state.consecutive_underruns >= 10) {
+                        int max_prebuf = g_state.sample_rate * g_state.frame_size / 5;
+                        int new_prebuf = (g_state.prebuffer_bytes * 3 / 2 < max_prebuf)
+                            ? g_state.prebuffer_bytes * 3 / 2 : max_prebuf;
+                        if (new_prebuf != g_state.prebuffer_bytes) {
+                            g_state.prebuffer_bytes = new_prebuf;
+                            LOGW("Re-prebuffer: threshold -> %d bytes (%d ms), avail=%d",
+                                 g_state.prebuffer_bytes,
+                                 g_state.prebuffer_bytes * 1000 / (g_state.sample_rate * g_state.frame_size),
+                                 avail);
+                        }
+                        /* 关键：重置 prebuffered，让下一轮 callback 走 prebuffer 门控发静音 */
+                        g_state.prebuffered = 0;
+                        g_state.silence_count = 0;
+                        g_state.consecutive_underruns = 0;
+                    }
+                } else {
+                    g_state.consecutive_underruns = 0;
+                    g_state.consecutive_ok++;
+                    /* 累加 USB 实际消费的帧数 */
+                    g_state.consumed_frames += actual / g_state.frame_size;
+
+                    /* 稳定运行后，逐步降低预填充阈值 */
+                    if (g_state.consecutive_ok >= 500) {
+                        int min_prebuf = g_state.sample_rate * g_state.frame_size / 50;
+                        if (g_state.prebuffer_bytes > min_prebuf) {
+                            g_state.prebuffer_bytes = g_state.prebuffer_bytes * 9 / 10;
+                            LOGI("Adaptive buffer: decreased prebuffer to %d bytes (%d ms)",
+                                 g_state.prebuffer_bytes,
+                                 g_state.prebuffer_bytes * 1000 / (g_state.sample_rate * g_state.frame_size));
+                        }
+                        g_state.consecutive_ok = 0;
+                    }
                 }
             }
 
@@ -518,6 +605,9 @@ JNIEXPORT jstring JNICALL
 Java_com_example_fold_audio_UsbAudioNative_nativeParseDescriptors(
     JNIEnv *env, jobject thiz)
 {
+    if (!g_state.handle) {
+        return (*env)->NewStringUTF(env, "ERROR: 设备未连接");
+    }
     libusb_device *dev = libusb_get_device(g_state.handle);
     struct libusb_config_descriptor *config;
     int ret = libusb_get_active_config_descriptor(dev, &config);
@@ -662,6 +752,11 @@ Java_com_example_fold_audio_UsbAudioNative_nativeSetFormat(
     JNIEnv *env, jobject thiz,
     jint sample_rate, jint bit_depth, jint channels)
 {
+    if (!g_state.handle) {
+        LOGE("nativeSetFormat called but g_state.handle is NULL (device disconnected?)");
+        return -1;
+    }
+
     g_state.sample_rate    = sample_rate;
     g_state.bit_depth      = bit_depth;
     g_state.channels       = channels;
@@ -736,6 +831,14 @@ Java_com_example_fold_audio_UsbAudioNative_nativeSetFormat(
                     LOGI("    EP OUT: addr=0x%02X raw_wMaxPacketSize=0x%04X "
                          "base_pkt=%d extra_txns=%d max_bytes_per_uf=%d",
                          ep_addr, raw_mps, max_pkt, extra_txns, max_bytes_per_uf);
+                }
+                /* 找 IN isochronous feedback endpoint（内核: ep_idx=1, bSynchAddress） */
+                if (ep_type == LIBUSB_TRANSFER_TYPE_ISOCHRONOUS &&
+                    (ep->bEndpointAddress & 0x80) &&
+                    ep->bEndpointAddress != 0x80) { /* 排除 EP0 */
+                    g_state.feedback_endpoint_addr = ep->bEndpointAddress;
+                    LOGI("    EP IN (feedback): addr=0x%02X wMaxPacketSize=%d",
+                         ep->bEndpointAddress, ep->wMaxPacketSize);
                 }
             }
             if (ep_addr < 0) {
@@ -1271,12 +1374,15 @@ Java_com_example_fold_audio_UsbAudioNative_nativeStart(
 
     g_state.is_playing = 1;
     g_state.underrun_count = 0;
+    g_state.consumed_frames = 0;
 
-    /* 初始化自适应 buffer 管理：50ms 预填充 */
-    g_state.prebuffer_bytes = g_state.sample_rate * g_state.frame_size / 20;
+    /* 初始化自适应 buffer 管理：100ms 预填充（50ms 在突发解码场景下不够） */
+    g_state.prebuffer_bytes = g_state.sample_rate * g_state.frame_size / 10;  /* 100ms */
     g_state.consecutive_underruns = 0;
     g_state.consecutive_ok = 0;
     g_state.ring_watermark = RING_BUFFER_SIZE;
+    g_state.prebuffered = 0;
+    g_state.silence_count = 0;
 
     LOGI("Playback started: %dHz %dbit %dch, %d iso transfers x %d packets, prebuffer=%d bytes (%dms)",
          g_state.sample_rate, g_state.bit_depth, g_state.channels,
@@ -1316,6 +1422,8 @@ JNIEXPORT jint JNICALL
 Java_com_example_fold_audio_UsbAudioNative_nativeWritePcm(
     JNIEnv *env, jobject thiz, jbyteArray data, jint offset, jint length)
 {
+    /* ring_buffer 为 NULL 表示已 release，避免访问已销毁的 mutex */
+    if (!g_state.ring_buffer) return 0;
     jbyte *buf = (*env)->GetByteArrayElements(env, data, NULL);
     int written = ring_write((uint8_t *)(buf + offset), length);
     (*env)->ReleaseByteArrayElements(env, data, buf, JNI_ABORT);
@@ -1397,6 +1505,17 @@ Java_com_example_fold_audio_UsbAudioNative_nativeGetSampleRate(
 }
 
 /*
+ * 获取 USB 已消费的总帧数（ISO 回调实际读取的帧数）
+ * 用于计算真实播放位置，而非提交到 ring buffer 的位置
+ */
+JNIEXPORT jlong JNICALL
+Java_com_example_fold_audio_UsbAudioNative_nativeGetConsumedFrames(
+    JNIEnv *env, jobject thiz)
+{
+    return (jlong)g_state.consumed_frames;
+}
+
+/*
  * 释放所有资源
  */
 JNIEXPORT void JNICALL
@@ -1408,8 +1527,13 @@ Java_com_example_fold_audio_UsbAudioNative_nativeRelease(
     }
 
     if (g_state.ring_buffer) {
-        free(g_state.ring_buffer);
+        /* 先置 NULL，让并发的 ring_write/ring_read 看到后退出 */
+        uint8_t *tmp = g_state.ring_buffer;
         g_state.ring_buffer = NULL;
+        /* 等一小段时间让并发访问完成 */
+        usleep(5000);
+        pthread_mutex_destroy(&g_state.ring_mutex);
+        free(tmp);
     }
 
     if (g_state.handle) {
@@ -1422,7 +1546,6 @@ Java_com_example_fold_audio_UsbAudioNative_nativeRelease(
         g_state.ctx = NULL;
     }
 
-    pthread_mutex_destroy(&g_state.ring_mutex);
     LOGI("Resources released");
 
     /* 关闭文件日志 */
