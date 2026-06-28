@@ -3,6 +3,7 @@ package com.example.fold.ui.reader
 import android.net.Uri
 import android.os.Build
 import android.webkit.WebView
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.DisposableEffect
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -119,6 +120,11 @@ fun ReaderScreen(
         context.getSharedPreferences("file_sort", android.content.Context.MODE_PRIVATE)
             .getBoolean("calculator_mode", false)
     }
+
+    // 返回手势拦截：面板打开时按返回关闭面板，而不是退出阅读器
+    BackHandler(enabled = showSettings) { showSettings = false }
+    BackHandler(enabled = showChapterList) { showChapterList = false }
+    BackHandler(enabled = showBookmarkList) { showBookmarkList = false }
 
     // 阅读主题颜色
     val theme = state.readingTheme

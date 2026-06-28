@@ -50,6 +50,9 @@ class UsbExclusiveAudioSink(
 
     private var deviceInfo: UsbAudioDeviceInfo? = null
 
+    // DSP engine for EQ processing
+    private var dspEngine: DspEngine? = null
+
     fun setDeviceInfo(info: UsbAudioDeviceInfo) {
         deviceInfo = info
         usbClockSourceId = info.clockSourceId
@@ -70,6 +73,13 @@ class UsbExclusiveAudioSink(
             "sampleRate=$sampleRate channelCount=$channelCount " +
             "pcmEncoding=${inputFormat.pcmEncoding} " +
             "bitrate=${inputFormat.bitrate} averageBitrate=${inputFormat.averageBitrate}")
+
+        // Initialize DSP engine
+        dspEngine?.destroy()
+        dspEngine = EqManager.createEngine(sampleRate, channelCount)
+        if (dspEngine != null) {
+            Log.i(TAG, "DSP engine created: rate=$sampleRate ch=$channelCount")
+        }
 
         encoding = if (inputFormat.pcmEncoding > 0) {
             inputFormat.pcmEncoding
@@ -135,17 +145,20 @@ class UsbExclusiveAudioSink(
                     Log.e(TAG, "setAltSetting failed, cannot start playback")
                     return
                 }
-                stream.setSampleRate(sampleRate, usbClockSourceId)
+                val rateOk = stream.setSampleRate(sampleRate, usbClockSourceId)
+                Log.i(TAG, "setSampleRate($sampleRate, csId=$usbClockSourceId): $rateOk")
             }
             isPlaying = true
             val started = stream.start()
             if (!started) {
                 Log.e(TAG, "stream.start() failed, cleaning up")
                 isPlaying = false
+                usbStarted = false
                 stream.stop()
             } else {
                 usbStarted = true
                 startStreamingThread()
+                Log.i(TAG, "USB stream started successfully")
             }
         }
     }
@@ -162,7 +175,22 @@ class UsbExclusiveAudioSink(
                 } catch (e: InterruptedException) {
                     break
                 } ?: continue
-                stream.writeRaw(chunk, writeBitDepth)
+                try {
+                    stream.writeRaw(chunk, writeBitDepth)
+                } catch (e: Exception) {
+                    Log.e(TAG, "writeRaw failed: ${e.message}")
+                    // Brief pause before retry to avoid tight error loop
+                    try { Thread.sleep(1) } catch (_: InterruptedException) { break }
+                }
+            }
+            // Drain remaining queue before exiting
+            while (pcmQueue.isNotEmpty()) {
+                val chunk = pcmQueue.poll() ?: break
+                try {
+                    stream.writeRaw(chunk, writeBitDepth)
+                } catch (_: Exception) {
+                    break
+                }
             }
             Log.i(TAG, "Streaming thread exited")
         }, "UsbStreamingThread").apply { start() }
@@ -212,19 +240,43 @@ class UsbExclusiveAudioSink(
         val pcmData = ByteArray(remaining)
         buffer.get(pcmData)
 
-        // Always convert float PCM to 16-bit integer before sending to USB device
-        val outputData = if (encoding == C.ENCODING_PCM_FLOAT) {
-            convertFloatTo16bit(pcmData, channelCount)
-        } else if (needsConversion) {
-            convertPcm(pcmData, srcBytesPerSample, usbBytesPerSample, channelCount, usbChannels)
+        // Apply DSP (EQ) processing if available
+        val processedData = if (encoding == C.ENCODING_PCM_FLOAT && dspEngine?.isReady == true) {
+            // Convert byte array to float array for DSP processing
+            val floatBuf = java.nio.ByteBuffer.wrap(pcmData).order(java.nio.ByteOrder.LITTLE_ENDIAN).asFloatBuffer()
+            val floatArray = FloatArray(floatBuf.remaining())
+            floatBuf.get(floatArray)
+            
+            // Apply EQ processing
+            dspEngine!!.processAudio(floatArray)
+            
+            // Convert back to byte array
+            val outBuf = java.nio.ByteBuffer.allocate(floatArray.size * 4).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            outBuf.asFloatBuffer().put(floatArray)
+            outBuf.array()
         } else {
             pcmData
         }
 
+        // Always convert float PCM to 16-bit integer before sending to USB device
+        val outputData = if (encoding == C.ENCODING_PCM_FLOAT) {
+            convertFloatTo16bit(processedData, channelCount)
+        } else if (needsConversion) {
+            convertPcm(processedData, srcBytesPerSample, usbBytesPerSample, channelCount, usbChannels)
+        } else {
+            processedData
+        }
+
+        // Try to enqueue with backpressure handling
         if (!pcmQueue.offer(outputData)) {
-            pcmQueue.poll()
-            pcmQueue.offer(outputData)
-            Log.w(TAG, "PCM queue full, dropped oldest chunk")
+            // Queue full - wait briefly for streaming thread to consume
+            val waited = pcmQueue.offer(outputData, 5, TimeUnit.MILLISECONDS)
+            if (!waited) {
+                // Still full after wait - drop oldest to avoid blocking ExoPlayer
+                pcmQueue.poll()
+                pcmQueue.offer(outputData)
+                Log.w(TAG, "PCM queue full, dropped oldest chunk")
+            }
         }
 
         submittedFrames += remaining / bytesPerFrame
@@ -299,6 +351,9 @@ class UsbExclusiveAudioSink(
         stream.stop()
         usbStarted = false
         stream.release()
+        dspEngine?.destroy()
+        dspEngine = null
+        EqManager.destroyEngine()
     }
 
     private fun drainAndStop() {
@@ -362,25 +417,34 @@ class UsbExclusiveAudioSink(
             for (ch in 0 until srcCh) {
                 val sample32 = when (srcBps) {
                     2 -> {
+                        // 16-bit signed → 32-bit, sign-extend
                         val lo = data[s].toInt() and 0xFF
-                        val hi = data[s + 1].toInt()
-                        (hi shl 8 or lo) shl 16
+                        val hi = data[s + 1].toInt() and 0xFF
+                        val raw16 = (hi shl 8) or lo
+                        // Sign-extend from 16 to 32 bits
+                        val signed16 = if (raw16 >= 0x8000) raw16 - 0x10000 else raw16
+                        signed16 shl 16
                     }
                     3 -> {
+                        // 24-bit signed → 32-bit, sign-extend
                         val b0 = data[s].toInt() and 0xFF
                         val b1 = data[s + 1].toInt() and 0xFF
-                        val b2 = data[s + 2].toInt()
-                        (b2 shl 16 or (b1 shl 8) or b0) shl 8
+                        val b2 = data[s + 2].toInt() and 0xFF
+                        val raw24 = (b2 shl 16) or (b1 shl 8) or b0
+                        // Sign-extend from 24 to 32 bits
+                        val signed24 = if (raw24 >= 0x800000) raw24 - 0x1000000 else raw24
+                        signed24 shl 8
                     }
                     4 -> {
                         if (encoding == C.ENCODING_PCM_FLOAT) {
                             val v = ByteBuffer.wrap(data, s, 4).order(ByteOrder.LITTLE_ENDIAN).float
                             (v.toDouble() * 2147483648.0).toInt().coerceIn(Int.MIN_VALUE, Int.MAX_VALUE)
                         } else {
+                            // 32-bit signed, already in correct range
                             (data[s].toInt() and 0xFF) or
                                 ((data[s + 1].toInt() and 0xFF) shl 8) or
                                 ((data[s + 2].toInt() and 0xFF) shl 16) or
-                                (data[s + 3].toInt() shl 24)
+                                ((data[s + 3].toInt() and 0xFF) shl 24)
                         }
                     }
                     else -> 0

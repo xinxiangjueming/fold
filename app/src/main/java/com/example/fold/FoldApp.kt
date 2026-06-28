@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.SystemClock
+import com.example.fold.audio.EqManager
 import com.example.fold.data.manager.AppHider
 import com.example.fold.util.FoldLogger
 import com.example.fold.util.ShizukuHelper
@@ -16,6 +17,7 @@ class FoldApp : Application() {
         AppContainer.init(this)
         val t2 = SystemClock.elapsedRealtime()
         ShizukuHelper.init()
+        EqManager.init(this)
         val t3 = SystemClock.elapsedRealtime()
 
         // 监听应用安装/卸载，自动刷新隐藏应用缓存

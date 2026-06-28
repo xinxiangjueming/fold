@@ -55,7 +55,8 @@ import kotlinx.coroutines.withContext
 fun AudioPlayerScreen(
     filePath: String,
     playlist: List<String> = emptyList(),
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onNavigateToEq: () -> Unit = {}
 ) {
     val vm: AudioPlayerViewModel = viewModel()
     val state by vm.state.collectAsState()
@@ -84,9 +85,11 @@ fun AudioPlayerScreen(
 
     // 弹窗状态（提升到 Column 外部）
     var showSleepDialog by remember { mutableStateOf(false) }
-    var showEqualizer by remember { mutableStateOf(false) }
     var showPlaylist by remember { mutableStateOf(false) }
     var showUsbDialog by remember { mutableStateOf(false) }
+
+    // 均衡器按钮点击 → 导航到 EQ 界面
+    val handleEqualizerClick: () -> Unit = { onNavigateToEq() }
 
     // USB 独占模式状态
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -113,7 +116,10 @@ fun AudioPlayerScreen(
             actions = {
                 // USB 独占模式按钮
                 if (MusicPlayerHolder.isExclusiveSupported()) {
-                    IconButton(onClick = { showUsbDialog = true }) {
+                    IconButton(onClick = {
+                        android.util.Log.i("AudioPlayerScreen", "USB button clicked, showUsbDialog=$showUsbDialog")
+                        showUsbDialog = true
+                    }) {
                         Icon(
                             Icons.Default.Usb,
                             contentDescription = "USB 独占",
@@ -149,10 +155,11 @@ fun AudioPlayerScreen(
             onToggleLyrics = { vm.toggleLyrics() },
             onSurface = onSurface,
             onSurfaceVar = onSurfaceVar,
-            surface = surface
+            surface = surface,
+            modifier = Modifier.weight(9f)
         )
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.weight(0.5f))
 
         // ===== 曲目名 =====
         Text(state.title, style = MaterialTheme.typography.titleMedium,
@@ -192,7 +199,7 @@ fun AudioPlayerScreen(
             sleepActive = state.sleepRemaining != 0,
             onLoopChange = { vm.cycleLoopMode() },
             onSleepClick = { showSleepDialog = true },
-            onEqualizerClick = { showEqualizer = true },
+            onEqualizerClick = handleEqualizerClick,
             onPlaylistClick = { showPlaylist = true },
             primaryColor = MaterialTheme.colorScheme.primary,
             variantColor = onSurfaceVar
@@ -210,9 +217,6 @@ fun AudioPlayerScreen(
             onDismiss = { showSleepDialog = false }
         )
     }
-    if (showEqualizer) {
-        EqualizerDialog(state.audioSessionId) { showEqualizer = false }
-    }
     if (showPlaylist) {
         // 提取到外部：这两个值不随进度变化，避免每 250ms 重组整个播放列表
         val playlistNames = remember(state.playlistPaths) {
@@ -229,20 +233,25 @@ fun AudioPlayerScreen(
 
     // ===== USB Exclusive Mode Dialog =====
     if (showUsbDialog) {
+        android.util.Log.i("AudioPlayerScreen", "Showing USB Exclusive Dialog")
         UsbExclusiveDialog(
             isExclusive = isExclusive,
             exclusiveLabel = exclusiveLabel,
             onEnable = { device, format, deviceInfo ->
                 scope.launch {
+                    android.util.Log.i("AudioPlayerScreen", "onEnable: device=${device.productName}, format=${format.label}, fd=${deviceInfo.fd}")
                     val stream = withContext(Dispatchers.IO) {
                         UsbAudioStream.create(deviceInfo, format.sampleRate, format.channels, format.bitDepth)
                     }
+                    android.util.Log.i("AudioPlayerScreen", "Stream created: ${stream != null}, handle=${stream?.nativeHandle ?: 0}")
                     if (stream != null) {
                         MusicPlayerHolder.setStream(stream)
                         MusicPlayerHolder.enableExclusiveMode(context, device, format, deviceInfo)
                         MusicPlayerHolder.releasePlayer()
                         exclusiveLabel = "${device.productName} ${format.label}"
                         vm.init(filePath, state.playlistPaths)
+                    } else {
+                        android.widget.Toast.makeText(context, "USB 流创建失败", android.widget.Toast.LENGTH_SHORT).show()
                     }
                     showUsbDialog = false
                 }
@@ -273,10 +282,11 @@ private fun AlbumOrLyrics(
     onToggleLyrics: () -> Unit,
     onSurface: Color,
     onSurfaceVar: Color,
-    surface: Color
+    surface: Color,
+    modifier: Modifier = Modifier
 ) {
     Box(
-        Modifier.fillMaxWidth().height(280.dp),
+        modifier.fillMaxWidth(),
         contentAlignment = Alignment.Center
     ) {
         AnimatedVisibility(visible = showLyrics && lyrics.isNotEmpty(), enter = fadeIn(), exit = fadeOut()) {
@@ -636,12 +646,14 @@ private fun UsbExclusiveDialog(
     var scanDone by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
+        android.util.Log.i("UsbExclusiveDialog", "LaunchedEffect: isExclusive=$isExclusive, scanDone=$scanDone")
         if (!isExclusive && !scanDone) {
             isScanning = true
             statusMsg = context.getString(R.string.usb_scanning)
 
             val foundDevices = withContext(Dispatchers.IO) { UsbAudioDeviceManager.scanDevices(usbManager) }
             devices = foundDevices
+            android.util.Log.i("UsbExclusiveDialog", "Found ${foundDevices.size} devices")
 
             if (foundDevices.isNotEmpty()) {
                 selectedDevice = foundDevices.first()
@@ -653,9 +665,11 @@ private fun UsbExclusiveDialog(
                         UsbAudioDeviceManager.requestPermission(dev.usbDevice, context) { g -> cont.resume(g) {} }
                     }
                 }
+                android.util.Log.i("UsbExclusiveDialog", "Permission granted: $granted")
                 if (granted) {
                     statusMsg = context.getString(R.string.usb_opening_device)
                     val info = withContext(Dispatchers.IO) { UsbAudioDeviceManager.openAndInit(dev, context) }
+                    android.util.Log.i("UsbExclusiveDialog", "Device info: $info")
                     if (info != null) {
                         deviceInfo = info
                         statusMsg = context.getString(R.string.usb_scanning_formats)

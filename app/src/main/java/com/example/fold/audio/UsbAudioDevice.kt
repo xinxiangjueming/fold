@@ -42,8 +42,13 @@ object UsbAudioDeviceManager {
 
     fun scanDevices(usbManager: UsbManager): List<UsbAudioDevice> {
         val result = mutableListOf<UsbAudioDevice>()
+        Log.i(TAG, "Scanning USB devices, total devices: ${usbManager.deviceList.size}")
         for (device in usbManager.deviceList.values) {
+            Log.i(TAG, "Checking device: ${device.productName ?: "unknown"}, " +
+                "VID=${device.vendorId.toString(16)}, PID=${device.productId.toString(16)}, " +
+                "interfaces=${device.interfaceCount}")
             if (isUsbAudioDevice(device)) {
+                Log.i(TAG, "Found USB audio device: ${device.productName}")
                 result.add(
                     UsbAudioDevice(
                         usbDevice = device,
@@ -53,6 +58,7 @@ object UsbAudioDeviceManager {
                 )
             }
         }
+        Log.i(TAG, "Found ${result.size} USB audio devices")
         return result
     }
 

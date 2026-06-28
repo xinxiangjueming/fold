@@ -21,8 +21,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -39,6 +42,7 @@ import com.example.fold.ui.theme.*
 import com.example.fold.ui.theme.LocalDarkMode
 import com.example.fold.ui.theme.toggleDarkMode
 import com.example.fold.util.FoldLogger
+import androidx.core.view.drawToBitmap
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -69,6 +73,7 @@ fun FileBrowserScreen(
     val files by viewModel.files.collectAsStateWithLifecycle()
     val calculatorMode by viewModel.calculatorMode.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val view = androidx.compose.ui.platform.LocalView.current
 
     // 切换伪装后同步更新 Activity intent（防止系统用已禁用的 alias 恢复任务）
     DisposableEffect(viewModel) {
@@ -99,29 +104,64 @@ fun FileBrowserScreen(
     // 压缩格式选择
     var compressTargetFile by remember { mutableStateOf<FileItem?>(null) }
 
-    // 返回手势处理：非根目录→返回上级，根目录→双击退出
+    // 返回手势处理：非根目录→返回上级（带预测性返回动画），根目录→双击退出
     var backPressedTime by remember { mutableStateOf(0L) }
-    BackHandler {
-        val isRoot = state.currentPath == getDisplayRoot(state)
-        FoldLogger.d(TAG, "BackHandler: isRoot=$isRoot, path=${state.currentPath}")
-        if (!isRoot) {
-            FoldLogger.d(TAG, "BackHandler: navigating up")
-            viewModel.navigateUp()
-        } else {
-            val now = System.currentTimeMillis()
-            if (now - backPressedTime < 2000) {
-                FoldLogger.i(TAG, "BackHandler: double-tap exit")
-                (context as? android.app.Activity)?.finish()
-            } else {
-                backPressedTime = now
-                Toast.makeText(context, context.getString(R.string.press_again_to_exit), Toast.LENGTH_SHORT).show()
+    var backProgress by remember { mutableFloatStateOf(0f) }
+    var isBackGestureActive by remember { mutableStateOf(false) }
+    var backScreenshot by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+
+    androidx.activity.compose.PredictiveBackHandler(enabled = state.currentPath != getDisplayRoot(state)) { backEvent ->
+        try {
+            backScreenshot = try { view.drawToBitmap() } catch (e: Exception) { null }
+            FoldLogger.d(TAG, "PredictiveBack: gesture started, screenshot=${backScreenshot != null}")
+            backEvent.collect { event ->
+                backProgress = event.progress
+                isBackGestureActive = true
             }
+            FoldLogger.d(TAG, "PredictiveBack: gesture completed, navigating up immediately")
+            // 手势完成：直接导航
+            isBackGestureActive = false
+            backProgress = 0f
+            backScreenshot = null
+            viewModel.navigateUp()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            FoldLogger.d(TAG, "PredictiveBack: gesture cancelled")
+            isBackGestureActive = false
+            backProgress = 0f
+            backScreenshot = null
         }
     }
 
+    // 动画进度（直接使用手势进度，不用 spring 动画）
+    val backScale = 1f - (backProgress * 0.08f)
+    val backTranslationX = backProgress * 100f
+    val backCornerRadius = backProgress * 24f
+
     // 不用 Scaffold，避免 contentWindowInsets 每帧重算布局
     FoldLogger.d(TAG, "FileBrowserScreen recompose: darkModeState=${com.example.fold.ui.theme.darkModeState.intValue}, background=${MaterialTheme.colorScheme.background}, onSurface=${MaterialTheme.colorScheme.onSurface}, surface=${MaterialTheme.colorScheme.surface}")
-    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    Box(Modifier.fillMaxSize()) {
+        // 背景：上一页截图（返回上级时显示）
+        backScreenshot?.let { bmp ->
+            androidx.compose.foundation.Image(
+                bitmap = bmp.asImageBitmap(),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        // 主内容：带动画效果
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+                .graphicsLayer {
+                    scaleX = backScale
+                    scaleY = backScale
+                    translationX = backTranslationX
+                    shadowElevation = backProgress * 20f
+                }
+                .clip(RoundedCornerShape(backCornerRadius.dp))
+        ) {
         Column(
             Modifier
                 .fillMaxSize()
@@ -312,7 +352,10 @@ fun FileBrowserScreen(
                         onClick = { file ->
                             FoldLogger.d(TAG, "onFileClick: name=${file.name}, isDir=${file.isDirectory}")
                             when {
-                                file.isDirectory -> viewModel.onFileClick(file)
+                                file.isDirectory -> {
+                                    com.example.fold.ui.common.PredictiveBackManager.captureCurrentScreen(view)
+                                    viewModel.onFileClick(file)
+                                }
                                 file.extension.lowercase() in setOf("jpg","jpeg","png","gif","webp","bmp","svg") -> onImageClick(file.path)
                                 file.extension.lowercase() in setOf("mp4","mkv","avi","mov","flv","wmv","webm","3gp","ts") -> onVideoClick(file.path)
                                 file.extension.lowercase() in setOf("mp3","wav","flac","aac","ogg","wma","m4a","opus","ape") -> onAudioClick(file.path)
@@ -632,6 +675,7 @@ fun FileBrowserScreen(
                 }
             }
         }
+        } // 关闭内层 Box（动画效果）
     }
 }
 

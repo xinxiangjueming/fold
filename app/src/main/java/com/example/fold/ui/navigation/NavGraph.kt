@@ -16,6 +16,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.navArgument
 import com.example.fold.MainActivity
+import com.example.fold.ui.common.PredictiveBackScreen
+import com.example.fold.ui.eq.EqScreen
 import com.example.fold.ui.filebrowser.FileBrowserScreen
 import com.example.fold.ui.calculator.CalculatorScreen
 import com.example.fold.ui.hidden.HiddenAppsScreen
@@ -43,6 +45,7 @@ object Routes {
     const val VIDEO_BASE = "video"
     const val AUDIO = "audio/{filePath}"
     const val AUDIO_BASE = "audio"
+    const val EQ = "eq"
 
     fun reader(filePath: String): String {
         return "reader/${android.net.Uri.encode(filePath)}"
@@ -70,6 +73,13 @@ private const val ANIM_DURATION = 250
 @Composable
 fun AppNavGraph(navController: NavHostController) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val view = androidx.compose.ui.platform.LocalView.current
+
+    // 包装 navigate，在跳转前截取当前页面
+    val navigateWithCapture: (String) -> Unit = { route ->
+        com.example.fold.ui.common.PredictiveBackManager.captureCurrentScreen(view)
+        navController.navigate(route)
+    }
 
     // 通知栏点击 → 自动打开播放页
     androidx.compose.runtime.LaunchedEffect(Unit) {
@@ -129,7 +139,7 @@ fun AppNavGraph(navController: NavHostController) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     val miniState by MiniPlayerState.state.collectAsState()
-    val showMiniPlayer = currentRoute != Routes.AUDIO && miniState.filePath.isNotEmpty() && currentRoute != null
+    val showMiniPlayer = currentRoute != Routes.AUDIO && currentRoute != Routes.EQ && miniState.filePath.isNotEmpty() && currentRoute != null
 
     // 当 ViewModel 销毁但 MusicPlayerHolder 仍有活跃播放器时，同步 MiniPlayerState
     androidx.compose.runtime.LaunchedEffect(currentRoute) {
@@ -158,16 +168,16 @@ fun AppNavGraph(navController: NavHostController) {
         navController = navController,
         startDestination = startDest,
         enterTransition = {
-            fadeIn(animationSpec = tween(ANIM_DURATION))
+            EnterTransition.None
         },
         exitTransition = {
-            fadeOut(animationSpec = tween(ANIM_DURATION))
+            ExitTransition.None
         },
         popEnterTransition = {
-            fadeIn(animationSpec = tween(ANIM_DURATION))
+            EnterTransition.None
         },
         popExitTransition = {
-            fadeOut(animationSpec = tween(ANIM_DURATION))
+            ExitTransition.None
         }
     ) {
         composable(Routes.CALCULATOR) {
@@ -183,31 +193,41 @@ fun AppNavGraph(navController: NavHostController) {
         composable(Routes.FILE_BROWSER) {
             FileBrowserScreen(
                 onFileClick = { filePath ->
-                    navController.navigate(Routes.reader(filePath))
+                    navigateWithCapture(Routes.reader(filePath))
                 },
                 onImageClick = { filePath ->
-                    navController.navigate(Routes.image(filePath))
+                    navigateWithCapture(Routes.image(filePath))
                 },
                 onArchiveClick = { filePath ->
-                    navController.navigate(Routes.archive(filePath))
+                    navigateWithCapture(Routes.archive(filePath))
                 },
                 onVideoClick = { filePath ->
-                    navController.navigate(Routes.video(filePath))
+                    navigateWithCapture(Routes.video(filePath))
                 },
                 onAudioClick = { filePath ->
                     navController.popBackStack(Routes.AUDIO_BASE, true)
-                    navController.navigate(Routes.audio(filePath))
+                    navigateWithCapture(Routes.audio(filePath))
                 },
                 onNavigateToHiddenApps = {
-                    navController.navigate(Routes.HIDDEN_APPS)
+                    navigateWithCapture(Routes.HIDDEN_APPS)
                 }
             )
         }
 
         composable(Routes.HIDDEN_APPS) {
-            HiddenAppsScreen(
-                onBack = { navController.popBackStack() }
-            )
+            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
+                HiddenAppsScreen(
+                    onBack = { navController.popBackStack() }
+                )
+            }
+        }
+
+        composable(Routes.EQ) {
+            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
+                EqScreen(
+                    onBack = { navController.popBackStack() }
+                )
+            }
         }
 
         composable(
@@ -216,10 +236,12 @@ fun AppNavGraph(navController: NavHostController) {
         ) { backStackEntry ->
             val encodedPath = backStackEntry.arguments?.getString("filePath") ?: ""
             val filePath = android.net.Uri.decode(encodedPath)
-            ReaderScreen(
-                filePath = filePath,
-                onBack = { navController.popBackStack() }
-            )
+            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
+                ReaderScreen(
+                    filePath = filePath,
+                    onBack = { navController.popBackStack() }
+                )
+            }
         }
 
         composable(
@@ -228,10 +250,12 @@ fun AppNavGraph(navController: NavHostController) {
         ) { backStackEntry ->
             val encodedPath = backStackEntry.arguments?.getString("filePath") ?: ""
             val filePath = android.net.Uri.decode(encodedPath)
-            ImageViewerScreen(
-                filePath = filePath,
-                onBack = { navController.popBackStack() }
-            )
+            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
+                ImageViewerScreen(
+                    filePath = filePath,
+                    onBack = { navController.popBackStack() }
+                )
+            }
         }
 
         composable(
@@ -240,10 +264,12 @@ fun AppNavGraph(navController: NavHostController) {
         ) { backStackEntry ->
             val encodedPath = backStackEntry.arguments?.getString("filePath") ?: ""
             val filePath = android.net.Uri.decode(encodedPath)
-            ArchiveViewerScreen(
-                filePath = filePath,
-                onBack = { navController.popBackStack() }
-            )
+            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
+                ArchiveViewerScreen(
+                    filePath = filePath,
+                    onBack = { navController.popBackStack() }
+                )
+            }
         }
 
         composable(
@@ -256,10 +282,12 @@ fun AppNavGraph(navController: NavHostController) {
         ) { backStackEntry ->
             val encodedPath = backStackEntry.arguments?.getString("filePath") ?: ""
             val filePath = android.net.Uri.decode(encodedPath)
-            VideoPlayerScreen(
-                filePath = filePath,
-                onBack = { navController.popBackStack() }
-            )
+            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
+                VideoPlayerScreen(
+                    filePath = filePath,
+                    onBack = { navController.popBackStack() }
+                )
+            }
         }
 
         composable(
@@ -272,10 +300,13 @@ fun AppNavGraph(navController: NavHostController) {
         ) { backStackEntry ->
             val encodedPath = backStackEntry.arguments?.getString("filePath") ?: ""
             val filePath = android.net.Uri.decode(encodedPath)
-            AudioPlayerScreen(
-                filePath = filePath,
-                onBack = { navController.popBackStack() }
-            )
+            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
+                AudioPlayerScreen(
+                    filePath = filePath,
+                    onBack = { navController.popBackStack() },
+                    onNavigateToEq = { navigateWithCapture(Routes.EQ) }
+                )
+            }
         }
     }
 

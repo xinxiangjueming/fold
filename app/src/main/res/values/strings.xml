@@ -187,4 +187,27 @@
     <string name="usb_disable_exclusive">关闭独占</string>
     <string name="usb_enable_exclusive">启用独占</string>
 
+    <!-- 均衡器 -->
+    <string name="eq_title">均衡器</string>
+    <string name="eq_enabled">均衡器</string>
+    <string name="eq_bass">低音</string>
+    <string name="eq_treble">高音</string>
+    <string name="eq_bands">频段</string>
+    <string name="eq_custom">自定义</string>
+    <string name="eq_reset">重置</string>
+    <string name="eq_test">测试</string>
+    <string name="eq_preset_title">选择预设</string>
+    <string name="eq_preset_flat">平直</string>
+    <string name="eq_preset_bass_boost">低音增强</string>
+    <string name="eq_preset_treble_boost">高音增强</string>
+    <string name="eq_preset_vocal">人声</string>
+    <string name="eq_preset_rock">摇滚</string>
+    <string name="eq_preset_pop">流行</string>
+    <string name="eq_preset_jazz">爵士</string>
+    <string name="eq_preset_classical">古典</string>
+    <string name="eq_preset_electronic">电子</string>
+    <string name="eq_status_active">均衡器已生效</string>
+    <string name="eq_status_inactive">均衡器已关闭</string>
+    <string name="eq_current_preset">当前预设：%1$s</string>
+
 </resources>

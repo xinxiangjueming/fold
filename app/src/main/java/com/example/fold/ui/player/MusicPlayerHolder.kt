@@ -10,6 +10,7 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import com.example.fold.audio.AudioFormat
+import com.example.fold.audio.DspRenderersFactory
 import com.example.fold.audio.UsbAudioDevice
 import com.example.fold.audio.UsbAudioDeviceInfo
 import com.example.fold.audio.UsbAudioStream
@@ -39,7 +40,11 @@ object MusicPlayerHolder {
     var isExclusiveMode = mutableStateOf(false)
         private set
 
-    fun isExclusiveSupported(): Boolean = Build.VERSION.SDK_INT >= 34
+    fun isExclusiveSupported(): Boolean {
+        // USB exclusive mode works on Android 8+ (API 26+)
+        // The UsbAudioStream uses Linux usbdevfs which is available on all Android versions
+        return Build.VERSION.SDK_INT >= 26
+    }
 
     fun getOrCreate(context: Context): ExoPlayer {
         if (exoPlayer == null) {
@@ -53,7 +58,10 @@ object MusicPlayerHolder {
     }
 
     private fun buildNormalPlayer(context: Context): ExoPlayer {
-        return ExoPlayer.Builder(context.applicationContext).build()
+        val renderersFactory = DspRenderersFactory(context.applicationContext)
+        return ExoPlayer.Builder(context.applicationContext)
+            .setRenderersFactory(renderersFactory)
+            .build()
     }
 
     private fun buildExclusivePlayer(context: Context): ExoPlayer {
