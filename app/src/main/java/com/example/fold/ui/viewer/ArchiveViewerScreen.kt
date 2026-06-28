@@ -2,23 +2,13 @@ package com.example.fold.ui.viewer
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -42,9 +32,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import com.example.fold.R
 import com.example.fold.data.archive.ArchiveEntry
 import com.example.fold.data.archive.ArchiveHelper
@@ -180,45 +170,27 @@ fun ArchiveViewerScreen(
                     }
                 }
                 else -> {
-                    LazyColumn(modifier = Modifier.fillMaxSize()) {
-                        items(entries) { entry ->
-                            ArchiveEntryRow(entry)
-                        }
+                    val adapter = remember { ArchiveListAdapter() }
+                    LaunchedEffect(entries) {
+                        adapter.submitList(entries)
                     }
+                    AndroidView(
+                        factory = { ctx ->
+                            androidx.recyclerview.widget.RecyclerView(ctx).apply {
+                                layoutManager = androidx.recyclerview.widget.LinearLayoutManager(ctx)
+                                this.adapter = adapter
+                                clipToPadding = false
+                                importantForAccessibility = android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                                // 底部 padding 避开导航栏
+                                setPadding(0, 0, 0, ctx.resources.displayMetrics.heightPixels.let {
+                                    val navBarId = ctx.resources.getIdentifier("navigation_bar_height", "dimen", "android")
+                                    if (navBarId > 0) ctx.resources.getDimensionPixelSize(navBarId) else 0
+                                })
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ArchiveEntryRow(entry: ArchiveEntry) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            imageVector = if (entry.isDirectory) Icons.Filled.Folder else Icons.AutoMirrored.Filled.InsertDriveFile,
-            contentDescription = null,
-            modifier = Modifier.size(20.dp),
-            tint = if (entry.isDirectory) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = entry.name,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            if (!entry.isDirectory && entry.size > 0) {
-                Text(
-                    text = formatFileSize(entry.size),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
             }
         }
     }

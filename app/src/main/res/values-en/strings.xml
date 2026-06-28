@@ -29,6 +29,8 @@
     <string name="equalizer_not_available">Equalizer not available</string>
     <string name="playlist_title">Playlist</string>
     <string name="action_share">Share</string>
+    <string name="action_open_with">Open with</string>
+    <string name="open_with_failed">Cannot open file</string>
     <string name="action_properties">Properties</string>
     <string name="action_edit">Edit</string>
     <string name="action_save">Save</string>
@@ -159,4 +161,22 @@
     <string name="permission_retry">Retry Permission</string>
     <string name="permission_open_settings">Open Settings</string>
     <string name="permission_app_settings">App Settings</string>
+
+    <!-- USB Exclusive Mode -->
+    <string name="usb_exclusive_title">USB Exclusive Mode</string>
+    <string name="usb_scanning">Scanning devices…</string>
+    <string name="usb_requesting_permission">Requesting USB permission…</string>
+    <string name="usb_opening_device">Opening device…</string>
+    <string name="usb_scanning_formats">Scanning supported formats…</string>
+    <string name="usb_no_formats_reported">Device did not report supported formats</string>
+    <string name="usb_open_failed">Failed to open device: %1$s</string>
+    <string name="usb_permission_denied">USB permission denied</string>
+    <string name="usb_no_devices_found">No USB Audio devices found</string>
+    <string name="usb_current_format">Current: %1$s</string>
+    <string name="usb_exclusive_active_desc">Exclusive mode active\nAudio sent directly to DAC, bypassing system mixer</string>
+    <string name="usb_select_device_hint">Scan for USB audio devices, then enable exclusive mode</string>
+    <string name="usb_supported_formats">Supported formats:</string>
+    <string name="usb_rescan">Rescan</string>
+    <string name="usb_disable_exclusive">Disable Exclusive</string>
+    <string name="usb_enable_exclusive">Enable Exclusive</string>
 </resources>

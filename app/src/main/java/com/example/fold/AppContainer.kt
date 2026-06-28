@@ -103,5 +103,6 @@ object AppContainer {
         releaseReaders()
         stopHttpServer()
         localFileProvider.clearAllCaches()
+        com.example.fold.ui.filebrowser.ThumbnailLoader.clearCache()
     }
 }

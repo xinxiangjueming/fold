@@ -13,6 +13,8 @@
     <string name="action_save">儲存</string>
     <string name="action_update">更新</string>
     <string name="action_cancel">取消</string>
+    <string name="action_open_with">以其他應用開啟</string>
+    <string name="open_with_failed">無法開啟檔案</string>
     <string name="action_up">返回上級</string>
 
     <!-- 檔案瀏覽 -->
@@ -136,4 +138,22 @@
     <string name="permission_retry">重新授權</string>
     <string name="permission_open_settings">前往設定開啟</string>
     <string name="permission_app_settings">應用設定</string>
+
+    <!-- USB 獨佔模式 -->
+    <string name="usb_exclusive_title">USB 獨佔模式</string>
+    <string name="usb_scanning">掃描裝置中…</string>
+    <string name="usb_requesting_permission">請求 USB 權限…</string>
+    <string name="usb_opening_device">開啟裝置…</string>
+    <string name="usb_scanning_formats">掃描支援的格式…</string>
+    <string name="usb_no_formats_reported">裝置未報告支援的格式</string>
+    <string name="usb_open_failed">開啟裝置失敗: %1$s</string>
+    <string name="usb_permission_denied">USB 權限被拒絕</string>
+    <string name="usb_no_devices_found">未發現 USB Audio 裝置</string>
+    <string name="usb_current_format">目前: %1$s</string>
+    <string name="usb_exclusive_active_desc">獨佔模式已啟動\n音訊資料直接送達 DAC，繞過系統 mixer</string>
+    <string name="usb_select_device_hint">掃描 USB 音訊裝置，選擇後啟用獨佔模式</string>
+    <string name="usb_supported_formats">支援的格式:</string>
+    <string name="usb_rescan">重新掃描</string>
+    <string name="usb_disable_exclusive">關閉獨佔</string>
+    <string name="usb_enable_exclusive">啟用獨佔</string>
 </resources>

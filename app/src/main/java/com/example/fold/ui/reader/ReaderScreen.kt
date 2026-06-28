@@ -608,22 +608,26 @@ private fun TxtReaderContent(
                     val isTtsCurrent = ttsParagraphIndex >= 0 &&
                         chapterIdx == state.currentChapterIndex && pi == ttsParagraphIndex
                     val displayText = if (state.reSegment && para.isNotBlank()) "$indent$para" else para
-                    if (isTtsCurrent && ttsCharStart >= 0 && ttsCharEnd > ttsCharStart) {
-                        val offset = if (state.reSegment) 2 else 0
-                        val s = (ttsCharStart + offset).coerceIn(0, displayText.length)
-                        val e = (ttsCharEnd + offset).coerceIn(0, displayText.length)
-                        val annotated = androidx.compose.ui.text.AnnotatedString.Builder(displayText.length).apply {
-                            append(displayText.substring(0, s))
-                            pushStyle(androidx.compose.ui.text.SpanStyle(color = Color(0xFFCC0000)))
-                            append(displayText.substring(s, e))
-                            pop()
-                            append(displayText.substring(e))
-                        }.toAnnotatedString()
-                        Text(text = annotated, style = textStyle)
-                    } else if (isTtsCurrent) {
-                        Text(text = displayText, style = textStyle.copy(color = Color(0xFFCC0000)))
-                    } else {
-                        Text(text = displayText, style = textStyle)
+                    Column {
+                        if (isTtsCurrent && ttsCharStart >= 0 && ttsCharEnd > ttsCharStart) {
+                            val offset = if (state.reSegment) 2 else 0
+                            val s = (ttsCharStart + offset).coerceIn(0, displayText.length)
+                            val e = (ttsCharEnd + offset).coerceIn(0, displayText.length)
+                            val annotated = androidx.compose.ui.text.AnnotatedString.Builder(displayText.length).apply {
+                                append(displayText.substring(0, s))
+                                pushStyle(androidx.compose.ui.text.SpanStyle(color = Color(0xFFCC0000)))
+                                append(displayText.substring(s, e))
+                                pop()
+                                append(displayText.substring(e))
+                            }.toAnnotatedString()
+                            Text(text = annotated, style = textStyle)
+                        } else if (isTtsCurrent) {
+                            Text(text = displayText, style = textStyle.copy(color = Color(0xFFCC0000)))
+                        } else {
+                            Text(text = displayText, style = textStyle)
+                        }
+                        // Paragraph gap: same as line height
+                        Spacer(Modifier.height((state.fontSize * state.lineSpacing).dp))
                     }
                 }
             }

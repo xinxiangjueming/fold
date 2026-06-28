@@ -16,6 +16,7 @@ import com.example.fold.ui.navigation.AppNavGraph
 import com.example.fold.ui.theme.FoldTheme
 import com.example.fold.util.FoldLogger
 import com.example.fold.util.ShizukuHelper
+import java.io.File
 
 private const val TAG = "FoldMain"
 
@@ -26,6 +27,8 @@ class MainActivity : AppCompatActivity() {
         var pendingOpenPlayer = androidx.compose.runtime.mutableStateOf(false)
         /** 息屏归隐：等待 Compose 就绪后导航到计算器 */
         var pendingNavigateCalculator = androidx.compose.runtime.mutableStateOf(false)
+        /** 系统打开文件：等待 Compose 就绪后导航到对应查看器 */
+        var pendingOpenFile = androidx.compose.runtime.mutableStateOf<String?>(null)
         /** 阅读器是否处于活跃状态（用于音量键翻页判断） */
         @Volatile
         var readerActive = false
@@ -79,6 +82,9 @@ class MainActivity : AppCompatActivity() {
             pendingOpenPlayer.value = true
         }
 
+        // 系统打开文件（ACTION_VIEW）
+        handleViewIntent(intent)
+
         // 初始化时同步 intent 指向当前启用的 alias
         val isCalcMode = getSharedPreferences("file_sort", MODE_PRIVATE)
             .getBoolean("calculator_mode", false)
@@ -92,6 +98,7 @@ class MainActivity : AppCompatActivity() {
             FoldLogger.i(TAG, "onNewIntent: OPEN_PLAYER")
             pendingOpenPlayer.value = true
         }
+        handleViewIntent(intent)
     }
 
     override fun onResume() {
@@ -132,5 +139,31 @@ class MainActivity : AppCompatActivity() {
             }
         }
         return super.onKeyDown(keyCode, event)
+    }
+
+    private fun handleViewIntent(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_VIEW) return
+        val uri = intent.data ?: return
+        // Convert content:// URI to file path
+        val filePath = try {
+            if (uri.scheme == "file") {
+                uri.path ?: return
+            } else {
+                // content:// URI — copy to cache first
+                val cacheDir = File(cacheDir, "shared")
+                cacheDir.mkdirs()
+                val fileName = uri.lastPathSegment ?: "shared_file"
+                val cacheFile = File(cacheDir, fileName)
+                contentResolver.openInputStream(uri)?.use { input ->
+                    cacheFile.outputStream().use { output -> input.copyTo(output) }
+                } ?: return
+                cacheFile.absolutePath
+            }
+        } catch (e: Exception) {
+            FoldLogger.e(TAG, "handleViewIntent: failed to resolve URI $uri", e)
+            return
+        }
+        FoldLogger.i(TAG, "handleViewIntent: filePath=$filePath")
+        pendingOpenFile.value = filePath
     }
 }

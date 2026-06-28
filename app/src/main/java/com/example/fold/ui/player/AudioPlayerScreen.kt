@@ -1,5 +1,6 @@
 package com.example.fold.ui.player
 
+import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -26,14 +27,20 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.fold.R
-import com.example.fold.audio.UsbAudioNative
+import com.example.fold.audio.AudioFormat
+import com.example.fold.audio.UsbAudioDevice
+import com.example.fold.audio.UsbAudioDeviceInfo
+import com.example.fold.audio.UsbAudioDeviceManager
+import com.example.fold.audio.UsbAudioStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -220,25 +227,23 @@ fun AudioPlayerScreen(
         )
     }
 
-    // ===== USB 独占模式弹窗 =====
+    // ===== USB Exclusive Mode Dialog =====
     if (showUsbDialog) {
         UsbExclusiveDialog(
             isExclusive = isExclusive,
             exclusiveLabel = exclusiveLabel,
-            onEnable = { device, format ->
+            onEnable = { device, format, deviceInfo ->
                 scope.launch {
-                    // 确保设备已打开（LaunchedEffect 扫描阶段可能已 openAndInit 过）
-                    withContext(Dispatchers.IO) {
-                        val ua = MusicPlayerHolder.usbAudio ?: UsbAudioNative(context).also { MusicPlayerHolder.setUsbAudio(it) }
-                        ua.openAndInit(device)
+                    val stream = withContext(Dispatchers.IO) {
+                        UsbAudioStream.create(deviceInfo, format.sampleRate, format.channels, format.bitDepth)
                     }
-                    // 切换模式 + 释放旧 player
-                    MusicPlayerHolder.enableExclusiveMode(context, device, format)
-                    MusicPlayerHolder.releasePlayer()
-                    exclusiveLabel = "${device.productName} ${format.label}"
-                    // ViewModel 重新 init → getOrCreate 创建独占 player
-                    vm.init(filePath, state.playlistPaths)
-                    // 状态更新完毕后再关闭弹窗，确保图标颜色同步刷新
+                    if (stream != null) {
+                        MusicPlayerHolder.setStream(stream)
+                        MusicPlayerHolder.enableExclusiveMode(context, device, format, deviceInfo)
+                        MusicPlayerHolder.releasePlayer()
+                        exclusiveLabel = "${device.productName} ${format.label}"
+                        vm.init(filePath, state.playlistPaths)
+                    }
                     showUsbDialog = false
                 }
             },
@@ -246,7 +251,6 @@ fun AudioPlayerScreen(
                 MusicPlayerHolder.disableExclusiveMode(context)
                 MusicPlayerHolder.releasePlayer()
                 exclusiveLabel = ""
-                // ViewModel 重新 init → getOrCreate 创建普通 player
                 vm.init(filePath, state.playlistPaths)
                 showUsbDialog = false
             },
@@ -485,7 +489,6 @@ private fun SleepTimerDialog(
 }
 
 /** 播放列表弹窗 */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PlaylistDialog(
     playlist: List<String>,
@@ -493,6 +496,32 @@ private fun PlaylistDialog(
     onSelect: (Int) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
+
+    // 预处理数据
+    val items = remember(playlist) {
+        playlist.mapIndexed { idx, path ->
+            PlaylistItem(
+                path = path,
+                displayName = path.substringAfterLast('/').substringBeforeLast('.'),
+                index = idx
+            )
+        }
+    }
+
+    val adapter = remember {
+        PlaylistAdapter { idx ->
+            onSelect(idx)
+            onDismiss()
+        }
+    }
+
+    // 更新数据
+    LaunchedEffect(items, currentIndex) {
+        adapter.submitList(items)
+        adapter.currentIndex = currentIndex
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -500,33 +529,20 @@ private fun PlaylistDialog(
                 modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
         },
         text = {
-            LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
-                itemsIndexed(playlist, key = { idx, _ -> idx }) { idx, name ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(
-                                if (idx == currentIndex) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                                else Color.Transparent
-                            )
-                            .combinedClickable(onClick = { onSelect(idx) })
-                            .padding(horizontal = 12.dp, vertical = 10.dp)
-                    ) {
-                        if (idx == currentIndex) {
-                            Icon(Icons.Filled.PlayArrow, contentDescription = null,
-                                modifier = Modifier.size(20.dp),
-                                tint = MaterialTheme.colorScheme.primary)
-                            Spacer(Modifier.width(8.dp))
+            AndroidView(
+                factory = { ctx ->
+                    androidx.recyclerview.widget.RecyclerView(ctx).apply {
+                        layoutManager = androidx.recyclerview.widget.LinearLayoutManager(ctx)
+                        this.adapter = adapter
+                        // 自动滚动到当前播放项
+                        if (currentIndex > 0) {
+                            (layoutManager as? androidx.recyclerview.widget.LinearLayoutManager)
+                                ?.scrollToPositionWithOffset(currentIndex, 200)
                         }
-                        Text(name, style = MaterialTheme.typography.bodyMedium,
-                            color = if (idx == currentIndex) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                }
-            }
+                },
+                modifier = Modifier.heightIn(max = 400.dp)
+            )
         },
         confirmButton = {},
         dismissButton = {}
@@ -603,57 +619,64 @@ private fun formatTime(ms: Long): String {
 private fun UsbExclusiveDialog(
     isExclusive: Boolean,
     exclusiveLabel: String,
-    onEnable: (UsbAudioNative.UsbAudioDevice, UsbAudioNative.AudioFormat) -> Unit,
+    onEnable: (UsbAudioDevice, AudioFormat, UsbAudioDeviceInfo) -> Unit,
     onDisable: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
-    var devices by remember { mutableStateOf<List<UsbAudioNative.UsbAudioDevice>>(emptyList()) }
-    var selectedDevice by remember { mutableStateOf<UsbAudioNative.UsbAudioDevice?>(null) }
-    var formats by remember { mutableStateOf<List<UsbAudioNative.AudioFormat>>(emptyList()) }
-    var selectedFormat by remember { mutableStateOf<UsbAudioNative.AudioFormat?>(null) }
+    val usbManager = remember { context.getSystemService(Context.USB_SERVICE) as android.hardware.usb.UsbManager }
+    var devices by remember { mutableStateOf<List<UsbAudioDevice>>(emptyList()) }
+    var selectedDevice by remember { mutableStateOf<UsbAudioDevice?>(null) }
+    var deviceInfo by remember { mutableStateOf<UsbAudioDeviceInfo?>(null) }
+    var formats by remember { mutableStateOf<List<AudioFormat>>(emptyList()) }
+    var selectedFormat by remember { mutableStateOf<AudioFormat?>(null) }
     var isScanning by remember { mutableStateOf(false) }
     var statusMsg by remember { mutableStateOf("") }
     var scanDone by remember { mutableStateOf(false) }
 
-    /* 自动扫描：弹窗打开时立即开始 */
     LaunchedEffect(Unit) {
         if (!isExclusive && !scanDone) {
             isScanning = true
-            statusMsg = "扫描设备中..."
+            statusMsg = context.getString(R.string.usb_scanning)
 
-            val usbNative = UsbAudioNative(context)
-            val foundDevices = withContext(Dispatchers.IO) { usbNative.scanDevices() }
+            val foundDevices = withContext(Dispatchers.IO) { UsbAudioDeviceManager.scanDevices(usbManager) }
             devices = foundDevices
 
             if (foundDevices.isNotEmpty()) {
                 selectedDevice = foundDevices.first()
                 val dev = foundDevices.first()
 
-                statusMsg = "请求 USB 权限..."
+                statusMsg = context.getString(R.string.usb_requesting_permission)
                 val granted = withContext(Dispatchers.IO) {
                     kotlinx.coroutines.suspendCancellableCoroutine<Boolean> { cont ->
-                        usbNative.requestPermission(dev.usbDevice) { g -> cont.resume(g) {} }
+                        UsbAudioDeviceManager.requestPermission(dev.usbDevice, context) { g -> cont.resume(g) {} }
                     }
                 }
                 if (granted) {
-                    statusMsg = "打开设备..."
-                    val (ok, info) = withContext(Dispatchers.IO) { usbNative.openAndInit(dev) }
-                    if (ok) {
-                        statusMsg = "扫描支持的格式..."
-                        formats = withContext(Dispatchers.IO) { usbNative.scanSupportedFormats() }
-                        selectedFormat = formats.firstOrNull()
-                        statusMsg = if (formats.isNotEmpty()) "" else "设备未报告支持的格式"
-                        MusicPlayerHolder.setUsbAudio(usbNative)
+                    statusMsg = context.getString(R.string.usb_opening_device)
+                    val info = withContext(Dispatchers.IO) { UsbAudioDeviceManager.openAndInit(dev, context) }
+                    if (info != null) {
+                        deviceInfo = info
+                        statusMsg = context.getString(R.string.usb_scanning_formats)
+                        val bestFormat = AudioFormat(44100, info.bestBitDepth, 2)
+                        formats = listOf(
+                            AudioFormat(44100, 16, 2), AudioFormat(44100, 24, 2), AudioFormat(44100, 32, 2),
+                            AudioFormat(48000, 16, 2), AudioFormat(48000, 24, 2), AudioFormat(48000, 32, 2),
+                            AudioFormat(96000, 16, 2), AudioFormat(96000, 24, 2), AudioFormat(96000, 32, 2),
+                            AudioFormat(192000, 16, 2), AudioFormat(192000, 24, 2), AudioFormat(192000, 32, 2),
+                        )
+                        selectedFormat = formats.firstOrNull { it.bitDepth == bestFormat.bitDepth }
+                            ?: formats.firstOrNull()
+                        statusMsg = if (formats.isNotEmpty()) "" else context.getString(R.string.usb_no_formats_reported)
                     } else {
-                        statusMsg = "打开设备失败: $info"
+                        statusMsg = context.getString(R.string.usb_open_failed, "")
                     }
                 } else {
-                    statusMsg = "USB 权限被拒绝"
+                    statusMsg = context.getString(R.string.usb_permission_denied)
                 }
             } else {
-                statusMsg = "未发现 USB Audio 设备"
+                statusMsg = context.getString(R.string.usb_no_devices_found)
             }
             isScanning = false
             scanDone = true
@@ -663,7 +686,7 @@ private fun UsbExclusiveDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text("USB 独占模式", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+            Text(stringResource(R.string.usb_exclusive_title), modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
         },
         text = {
             Column(
@@ -672,16 +695,16 @@ private fun UsbExclusiveDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (isExclusive) {
-                    Text("当前: $exclusiveLabel", color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center)
-                    Text("独占模式已激活\n音频数据直接送达 DAC，绕过系统 mixer",
+                    Text(stringResource(R.string.usb_current_format, exclusiveLabel),
+                        color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center)
+                    Text(stringResource(R.string.usb_exclusive_active_desc),
                         fontSize = 13.sp, textAlign = TextAlign.Center)
                 } else {
-                    Text("扫描 USB 音频设备，选择后启用独占模式",
+                    Text(stringResource(R.string.usb_select_device_hint),
                         fontSize = 13.sp, textAlign = TextAlign.Center)
 
                     Spacer(Modifier.height(4.dp))
 
-                    /* 扫描进度 */
                     if (isScanning) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
@@ -690,12 +713,10 @@ private fun UsbExclusiveDialog(
                         }
                     }
 
-                    /* 扫描完成后的状态 */
                     if (!isScanning && statusMsg.isNotEmpty()) {
                         Text(statusMsg, fontSize = 12.sp, color = Color.Gray, textAlign = TextAlign.Center)
                     }
 
-                    /* 设备列表 */
                     if (devices.isNotEmpty()) {
                         devices.forEach { dev ->
                             Row(
@@ -711,10 +732,9 @@ private fun UsbExclusiveDialog(
                         }
                     }
 
-                    /* 格式选择 */
                     if (formats.isNotEmpty()) {
                         Spacer(Modifier.height(4.dp))
-                        Text("支持的格式:", fontSize = 13.sp, color = Color.Gray)
+                        Text(stringResource(R.string.usb_supported_formats), fontSize = 13.sp, color = Color.Gray)
                         val grouped = formats.groupBy { it.sampleRate }
                         grouped.forEach { (rate, fmts) ->
                             Row(
@@ -732,34 +752,29 @@ private fun UsbExclusiveDialog(
                         }
                     }
 
-                    /* 重新扫描按钮 */
                     if (!isScanning && scanDone) {
                         Spacer(Modifier.height(4.dp))
                         TextButton(onClick = {
-                            scanDone = false
-                            devices = emptyList()
-                            formats = emptyList()
-                            selectedFormat = null
-                            statusMsg = ""
-                        }) { Text("重新扫描", fontSize = 13.sp) }
+                            scanDone = false; devices = emptyList(); formats = emptyList()
+                            selectedFormat = null; statusMsg = ""; deviceInfo = null
+                        }) { Text(stringResource(R.string.usb_rescan), fontSize = 13.sp) }
                     }
                 }
 
-                /* 按钮行：单独取消时居中，有操作按钮时取消在左、操作在右 */
                 Spacer(Modifier.height(12.dp))
                 val hasAction = isExclusive || (selectedDevice != null && selectedFormat != null)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = if (hasAction) Arrangement.SpaceBetween else Arrangement.Center,
                 ) {
-                    TextButton(onClick = onDismiss) { Text("取消") }
+                    TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
                     if (isExclusive) {
                         TextButton(onClick = onDisable) {
-                            Text("关闭独占", color = Color.Red)
+                            Text(stringResource(R.string.usb_disable_exclusive), color = Color.Red)
                         }
-                    } else if (selectedDevice != null && selectedFormat != null) {
-                        TextButton(onClick = { onEnable(selectedDevice!!, selectedFormat!!) }) {
-                            Text("启用独占")
+                    } else if (selectedDevice != null && selectedFormat != null && deviceInfo != null) {
+                        TextButton(onClick = { onEnable(selectedDevice!!, selectedFormat!!, deviceInfo!!) }) {
+                            Text(stringResource(R.string.usb_enable_exclusive))
                         }
                     }
                 }

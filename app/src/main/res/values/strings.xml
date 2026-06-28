@@ -30,6 +30,8 @@
     <string name="equalizer_not_available">设备不支持均衡器</string>
     <string name="playlist_title">播放列表</string>
     <string name="action_share">分享</string>
+    <string name="action_open_with">用其他应用打开</string>
+    <string name="open_with_failed">无法打开</string>
     <string name="action_properties">属性</string>
     <string name="action_edit">编辑</string>
     <string name="action_save">保存</string>
@@ -166,5 +168,23 @@
     <string name="permission_retry">重新授权</string>
     <string name="permission_open_settings">前往设置开启</string>
     <string name="permission_app_settings">应用设置</string>
+
+    <!-- USB 独占模式 -->
+    <string name="usb_exclusive_title">USB 独占模式</string>
+    <string name="usb_scanning">扫描设备中…</string>
+    <string name="usb_requesting_permission">请求 USB 权限…</string>
+    <string name="usb_opening_device">打开设备…</string>
+    <string name="usb_scanning_formats">扫描支持的格式…</string>
+    <string name="usb_no_formats_reported">设备未报告支持的格式</string>
+    <string name="usb_open_failed">打开设备失败: %1$s</string>
+    <string name="usb_permission_denied">USB 权限被拒绝</string>
+    <string name="usb_no_devices_found">未发现 USB Audio 设备</string>
+    <string name="usb_current_format">当前: %1$s</string>
+    <string name="usb_exclusive_active_desc">独占模式已激活\n音频数据直接送达 DAC，绕过系统 mixer</string>
+    <string name="usb_select_device_hint">扫描 USB 音频设备，选择后启用独占模式</string>
+    <string name="usb_supported_formats">支持的格式:</string>
+    <string name="usb_rescan">重新扫描</string>
+    <string name="usb_disable_exclusive">关闭独占</string>
+    <string name="usb_enable_exclusive">启用独占</string>
 
 </resources>

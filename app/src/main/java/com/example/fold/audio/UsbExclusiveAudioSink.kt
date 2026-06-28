@@ -1,6 +1,7 @@
 package com.example.fold.audio
 
-import android.content.Context
+import android.os.Process
+import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.AuxEffectInfo
 import androidx.media3.common.C
@@ -10,13 +11,18 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.util.Util
 import androidx.media3.exoplayer.audio.AudioSink
 import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.TimeUnit
 
-/**
- * ExoPlayer AudioSink：拦截 PCM，通过 libusb 等时传输发送到 USB DAC
- */
 class UsbExclusiveAudioSink(
-    private val usbAudio: UsbAudioNative,
+    private val stream: UsbAudioStream,
 ) : AudioSink {
+
+    companion object {
+        private const val TAG = "UsbSink"
+        private const val QUEUE_CAPACITY = 128
+    }
 
     private var listener: AudioSink.Listener? = null
     private var isPlaying = false
@@ -26,9 +32,28 @@ class UsbExclusiveAudioSink(
     private var channelCount = 0
     private var encoding = C.ENCODING_PCM_16BIT
     private var bytesPerFrame = 0
+
     private var usbBitDepth = 16
     private var usbChannels = 2
     private var usbBytesPerSample = 2
+    private var usbClockSourceId = 0
+
+    private var needsConversion = false
+    private var srcBytesPerSample = 2
+
+    private var bufferCount = 0L
+    private var lastBufferLogMs = 0L
+    private var usbStarted = false
+
+    private val pcmQueue = ArrayBlockingQueue<ByteArray>(QUEUE_CAPACITY)
+    private var streamingThread: Thread? = null
+
+    private var deviceInfo: UsbAudioDeviceInfo? = null
+
+    fun setDeviceInfo(info: UsbAudioDeviceInfo) {
+        deviceInfo = info
+        usbClockSourceId = info.clockSourceId
+    }
 
     override fun setListener(listener: AudioSink.Listener) { this.listener = listener }
     override fun supportsFormat(format: Format): Boolean = MimeTypes.isAudio(format.sampleMimeType ?: "")
@@ -37,109 +62,148 @@ class UsbExclusiveAudioSink(
 
     @Throws(AudioSink.ConfigurationException::class)
     override fun configure(inputFormat: Format, specifiedBufferSize: Int, outputChannels: IntArray?) {
-        submittedFrames = 0L  // 新曲目重置位置
+        submittedFrames = 0L
         sampleRate = inputFormat.sampleRate
         channelCount = inputFormat.channelCount
 
-        /* 详细日志：ExoPlayer 给了什么格式 */
-        android.util.Log.i("UsbSink", "configure: mime=${inputFormat.sampleMimeType} " +
+        Log.i(TAG, "configure: mime=${inputFormat.sampleMimeType} " +
             "sampleRate=$sampleRate channelCount=$channelCount " +
             "pcmEncoding=${inputFormat.pcmEncoding} " +
             "bitrate=${inputFormat.bitrate} averageBitrate=${inputFormat.averageBitrate}")
 
-        /*
-         * Format.pcmEncoding 可能为 0 或 -1（无效），常见于：
-         * - ExoPlayer 解码器输出 Format 没携带 pcmEncoding 键
-         * - MP3/AAC 解码后 MediaFormat 的 pcm-encoding 未传递到 Format
-         * fallback 到 16bit PCM
-         */
         encoding = if (inputFormat.pcmEncoding > 0) {
             inputFormat.pcmEncoding
         } else {
-            android.util.Log.w("UsbSink", "pcmEncoding=0 (invalid), fallback to ENCODING_PCM_16BIT")
+            Log.w(TAG, "pcmEncoding=0 (invalid), fallback to ENCODING_PCM_16BIT")
             C.ENCODING_PCM_16BIT
         }
 
-        /* 安全计算 frameSize */
         bytesPerFrame = try {
             Util.getPcmFrameSize(encoding, channelCount)
         } catch (e: IllegalArgumentException) {
-            android.util.Log.w("UsbSink", "getPcmFrameSize failed for encoding=$encoding, fallback to 16bit", e)
+            Log.w(TAG, "getPcmFrameSize failed for encoding=$encoding, fallback to 16bit", e)
             encoding = C.ENCODING_PCM_16BIT
             channelCount * 2
         }
 
-        android.util.Log.i("UsbSink", "Resolved: encoding=$encoding bytesPerFrame=$bytesPerFrame")
-
-        usbChannels = 2
-        usbBytesPerSample = when (encoding) {
-            C.ENCODING_PCM_16BIT -> 2
+        srcBytesPerSample = when (encoding) {
+            C.ENCODING_PCM_FLOAT, C.ENCODING_PCM_32BIT -> 4
             C.ENCODING_PCM_24BIT -> 3
-            C.ENCODING_PCM_32BIT, C.ENCODING_PCM_FLOAT -> 4
+            C.ENCODING_PCM_16BIT -> 2
             else -> 2
         }
-        usbBitDepth = usbBytesPerSample * 8
 
-        android.util.Log.i("UsbSink", "USB output: ${sampleRate}Hz ${usbBitDepth}bit ${usbChannels}ch")
+        Log.i(TAG, "ExoPlayer output: encoding=$encoding bytesPerFrame=$bytesPerFrame srcBps=$srcBytesPerSample")
 
-        /* 仅配置格式，不启动 ISO 传输（延迟到 play()） */
-        val result = usbAudio.setFormat(sampleRate, usbBitDepth, usbChannels)
-        if (result == -2) {
-            android.util.Log.w("UsbSink", "Format not supported by USB device, fallback to 16bit")
-            usbBitDepth = 16; usbBytesPerSample = 2
-            encoding = C.ENCODING_PCM_16BIT  // 同步 encoding，避免 handleBuffer 转换逻辑错乱
-            usbAudio.setFormat(sampleRate, 16, 2)
+        val info = deviceInfo
+        if (info != null) {
+            usbBitDepth = info.bestBitDepth
+            usbBytesPerSample = usbBitDepth / 8
+            usbChannels = 2
+            usbClockSourceId = info.clockSourceId
+            Log.i(TAG, "Using device info: ${usbBitDepth}bit, iface=${info.interfaceId}, " +
+                "alt=${info.bestAltSetting}, epOut=0x${info.endpointOut.toString(16)}, " +
+                "csId=$usbClockSourceId, maxPkt=${info.maxPacketSize}")
+        } else {
+            // Fallback: no device info, use source format
+            usbChannels = 2
+            usbBytesPerSample = srcBytesPerSample
+            usbBitDepth = srcBytesPerSample * 8
+            Log.w(TAG, "No device info, using source format: ${usbBitDepth}bit")
         }
+
+        // Float PCM is always converted to 16-bit in handleBuffer, so effective srcBps is 2
+        val effectiveSrcBps = if (encoding == C.ENCODING_PCM_FLOAT) 2 else srcBytesPerSample
+        needsConversion = (effectiveSrcBps != usbBytesPerSample) || (channelCount != usbChannels)
+        Log.i(TAG, "USB output: ${sampleRate}Hz ${usbBitDepth}bit ${usbChannels}ch " +
+            "usbBps=$usbBytesPerSample, needsConversion=$needsConversion " +
+            "(srcBps=$srcBytesPerSample, srcCh=$channelCount)")
     }
 
     override fun play() {
-        android.util.Log.i("UsbSink", "play() called, encoding=$encoding usbBitDepth=$usbBitDepth, usbStarted=$usbStarted")
+        Log.i(TAG, "play() called, encoding=$encoding usbBitDepth=$usbBitDepth, usbStarted=$usbStarted")
         if (usbStarted) {
-            /* USB 已由 auto-start 启动，不要重启（会清空 ring buffer） */
             isPlaying = true
         } else {
-            usbAudio.stopPlayback()
+            stream.stop()
+            // Activate the alt setting to enable the ISO endpoint
+            val info = deviceInfo
+            if (info != null) {
+                val altOk = stream.setAltSetting(info.bestAltSetting)
+                Log.i(TAG, "setAltSetting(${info.bestAltSetting}): $altOk")
+                if (!altOk) {
+                    Log.e(TAG, "setAltSetting failed, cannot start playback")
+                    return
+                }
+                stream.setSampleRate(sampleRate, usbClockSourceId)
+            }
             isPlaying = true
-            val result = usbAudio.startPlayback(sampleRate, usbBitDepth, usbChannels)
-            if (result < 0) {
-                android.util.Log.e("UsbSink", "startPlayback failed: $result, cleaning up")
+            val started = stream.start()
+            if (!started) {
+                Log.e(TAG, "stream.start() failed, cleaning up")
                 isPlaying = false
-                usbAudio.stopPlayback()
+                stream.stop()
             } else {
                 usbStarted = true
+                startStreamingThread()
             }
         }
     }
 
-    private var bufferCount = 0L
-    private var lastBufferLogMs = 0L
-    private var usbStarted = false
+    private fun startStreamingThread() {
+        streamingThread = Thread({
+            Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
+            Log.i(TAG, "Streaming thread started")
+            // When encoding is float, data is already converted to 16-bit in handleBuffer
+            val writeBitDepth = if (encoding == C.ENCODING_PCM_FLOAT) 16 else srcBytesPerSample * 8
+            while (isPlaying || pcmQueue.isNotEmpty()) {
+                val chunk = try {
+                    pcmQueue.poll(10, TimeUnit.MILLISECONDS)
+                } catch (e: InterruptedException) {
+                    break
+                } ?: continue
+                stream.writeRaw(chunk, writeBitDepth)
+            }
+            Log.i(TAG, "Streaming thread exited")
+        }, "UsbStreamingThread").apply { start() }
+    }
 
     @Throws(AudioSink.InitializationException::class, AudioSink.WriteException::class)
     override fun handleBuffer(buffer: ByteBuffer, presentationTimeUs: Long, encodedAccessUnitCount: Int): Boolean {
         val remaining = buffer.remaining()
         if (remaining <= 0) {
-            android.util.Log.w("UsbSink", "handleBuffer: empty buffer (remaining=0)")
+            Log.w(TAG, "handleBuffer: empty buffer (remaining=0)")
             return false
         }
 
-        /* 首次收到数据时自动启动 USB 传输（ExoPlayer 可能不调用 play()） */
         if (!usbStarted) {
-            android.util.Log.i("UsbSink", "Auto-starting USB on first handleBuffer")
-            usbAudio.stopPlayback()
-            val result = usbAudio.startPlayback(sampleRate, usbBitDepth, usbChannels)
-            if (result < 0) {
-                android.util.Log.e("UsbSink", "Auto-start failed: $result")
+            Log.i(TAG, "Auto-starting USB on first handleBuffer")
+            stream.stop()
+            // Activate the alt setting to enable the ISO endpoint
+            val info = deviceInfo
+            if (info != null) {
+                val altOk = stream.setAltSetting(info.bestAltSetting)
+                Log.i(TAG, "setAltSetting(${info.bestAltSetting}): $altOk")
+                if (!altOk) {
+                    Log.e(TAG, "setAltSetting failed in auto-start")
+                    return false
+                }
+                stream.setSampleRate(sampleRate, usbClockSourceId)
+            }
+            val started = stream.start()
+            if (!started) {
+                Log.e(TAG, "Auto-start failed")
                 return false
             }
             usbStarted = true
             isPlaying = true
+            startStreamingThread()
         }
 
         bufferCount++
         val now = android.os.SystemClock.uptimeMillis()
         if (bufferCount <= 5 || now - lastBufferLogMs > 2000) {
-            android.util.Log.i("UsbSink", "handleBuffer #$bufferCount: ${remaining}bytes, " +
+            Log.i(TAG, "handleBuffer #$bufferCount: ${remaining}bytes, " +
                 "pts=${presentationTimeUs}us, frames=$submittedFrames, " +
                 "pos=${submittedFrames * 1000 / sampleRate}ms")
             lastBufferLogMs = now
@@ -147,13 +211,22 @@ class UsbExclusiveAudioSink(
 
         val pcmData = ByteArray(remaining)
         buffer.get(pcmData)
-        if (encoding != C.ENCODING_PCM_16BIT && usbBitDepth == 16) {
-            usbAudio.writePcm(convertTo16bit(pcmData, encoding, channelCount))
-        } else if (channelCount != usbChannels) {
-            usbAudio.writePcm(convertChannels(pcmData, channelCount, usbChannels, usbBytesPerSample))
+
+        // Always convert float PCM to 16-bit integer before sending to USB device
+        val outputData = if (encoding == C.ENCODING_PCM_FLOAT) {
+            convertFloatTo16bit(pcmData, channelCount)
+        } else if (needsConversion) {
+            convertPcm(pcmData, srcBytesPerSample, usbBytesPerSample, channelCount, usbChannels)
         } else {
-            usbAudio.writePcm(pcmData)
+            pcmData
         }
+
+        if (!pcmQueue.offer(outputData)) {
+            pcmQueue.poll()
+            pcmQueue.offer(outputData)
+            Log.w(TAG, "PCM queue full, dropped oldest chunk")
+        }
+
         submittedFrames += remaining / bytesPerFrame
         return true
     }
@@ -162,22 +235,24 @@ class UsbExclusiveAudioSink(
     override fun playToEndOfStream() {}
 
     override fun handleDiscontinuity() {}
+
+    @Volatile private var released = false
+
     override fun getCurrentPositionUs(sourceEnded: Boolean): Long {
+        if (released) return C.TIME_UNSET
         val sr = sampleRate
         if (sr <= 0) return C.TIME_UNSET
-        // 用 USB 实际消费的帧数计算位置（而非 submittedFrames）
-        // 这样 ExoPlayer 看到的是真实播放位置，不会过度节流解码器
-        val consumed = usbAudio.getConsumedFrames()
-        if (consumed <= 0L) return C.TIME_UNSET
         return try {
-            (consumed * 1_000_000L / sr).coerceAtLeast(0L)
+            val written = stream.getFramesWritten()
+            if (written <= 0L) C.TIME_UNSET
+            else (written * 1_000_000L / sr).coerceAtLeast(0L)
         } catch (_: Exception) {
             C.TIME_UNSET
         }
     }
 
     override fun isEnded(): Boolean = !isPlaying && submittedFrames > 0
-    override fun hasPendingData(): Boolean = isPlaying
+    override fun hasPendingData(): Boolean = isPlaying || pcmQueue.isNotEmpty()
     override fun setPlaybackParameters(playbackParameters: PlaybackParameters) {}
     override fun getPlaybackParameters(): PlaybackParameters = PlaybackParameters.DEFAULT
     override fun setSkipSilenceEnabled(skipSilenceEnabled: Boolean) {}
@@ -191,71 +266,151 @@ class UsbExclusiveAudioSink(
     override fun setVolume(volume: Float) {}
 
     override fun pause() {
-        android.util.Log.w("UsbSink", "pause() called, submittedFrames=$submittedFrames")
-        isPlaying = false; usbStarted = false; usbAudio.stopPlayback()
+        Log.i(TAG, "pause() called, submittedFrames=$submittedFrames")
+        isPlaying = false
+        drainAndStop()
     }
+
     override fun flush() {
-        android.util.Log.w("UsbSink", "flush() called, submittedFrames=$submittedFrames")
-        isPlaying = false; submittedFrames = 0; bufferCount = 0; usbStarted = false; usbAudio.stopPlayback()
+        Log.i(TAG, "flush() called, submittedFrames=$submittedFrames")
+        isPlaying = false
+        pcmQueue.clear()
+        drainAndStop()
+        submittedFrames = 0
+        bufferCount = 0
     }
+
     override fun reset() {
-        android.util.Log.w("UsbSink", "reset() called, submittedFrames=$submittedFrames")
-        isPlaying = false; submittedFrames = 0; bufferCount = 0; usbStarted = false; usbAudio.stopPlayback()
+        Log.i(TAG, "reset() called, submittedFrames=$submittedFrames")
+        isPlaying = false
+        pcmQueue.clear()
+        drainAndStop()
+        submittedFrames = 0
+        bufferCount = 0
     }
-    override fun release() { reset() }
 
-    /* ── 格式转换 ── */
+    override fun release() {
+        Log.i(TAG, "release() called")
+        released = true
+        isPlaying = false
+        pcmQueue.clear()
+        joinStreamingThread()  // Ensure thread exits before releasing native resources
+        stream.drain()
+        stream.stop()
+        usbStarted = false
+        stream.release()
+    }
 
-    private fun convertTo16bit(data: ByteArray, srcEncoding: Int, channels: Int): ByteArray {
-        val srcBps = when (srcEncoding) {
-            C.ENCODING_PCM_FLOAT, C.ENCODING_PCM_32BIT -> 4
-            C.ENCODING_PCM_24BIT -> 3
-            else -> 4
+    private fun drainAndStop() {
+        // 1. Signal thread to exit
+        isPlaying = false
+        // 2. Wait for streaming thread to finish (it must not call writeRaw after this)
+        joinStreamingThread()
+        // 3. Now safe to drain and stop the native stream
+        stream.drain()
+        stream.stop()
+        usbStarted = false
+    }
+
+    private fun joinStreamingThread() {
+        val t = streamingThread ?: return
+        streamingThread = null
+        try {
+            t.join(1000)
+        } catch (e: InterruptedException) {
+            Log.w(TAG, "Interrupted while joining streaming thread")
         }
-        val srcFrameSize = channels * srcBps
-        val dstFrameSize = channels * 2
+    }
+
+    /**
+     * Convert float PCM (4 bytes/sample) to 16-bit integer PCM (2 bytes/sample).
+     * Float range [-1.0, 1.0] maps to [-32768, 32767].
+     * This is mathematically lossless for 16-bit source (float32 has 24-bit mantissa).
+     */
+    private fun convertFloatTo16bit(data: ByteArray, channels: Int): ByteArray {
+        val sampleCount = data.size / 4
+        val out = ByteArray(sampleCount * 2)
+        var si = 0; var di = 0
+        for (i in 0 until sampleCount) {
+            val bits = (data[si].toInt() and 0xFF) or
+                ((data[si+1].toInt() and 0xFF) shl 8) or
+                ((data[si+2].toInt() and 0xFF) shl 16) or
+                (data[si+3].toInt() shl 24)
+            val f = Float.fromBits(bits)
+            val s = (f.coerceIn(-1f, 1f) * 32768f).toInt().coerceIn(-32768, 32767)
+            out[di++] = (s and 0xFF).toByte()
+            out[di++] = ((s shr 8) and 0xFF).toByte()
+            si += 4
+        }
+        return out
+    }
+
+    private fun convertPcm(
+        data: ByteArray,
+        srcBps: Int,
+        dstBps: Int,
+        srcCh: Int,
+        dstCh: Int,
+    ): ByteArray {
+        val srcFrameSize = srcCh * srcBps
+        val dstFrameSize = dstCh * dstBps
         val frames = data.size / srcFrameSize
         val result = ByteArray(frames * dstFrameSize)
         var s = 0; var d = 0
+
         for (f in 0 until frames) {
-            for (ch in 0 until channels) {
-                val sample16 = when (srcEncoding) {
-                    C.ENCODING_PCM_FLOAT -> {
-                        val v = ByteBuffer.wrap(data, s, 4).order(java.nio.ByteOrder.LITTLE_ENDIAN).float
-                        (v.coerceIn(-1f, 1f) * Short.MAX_VALUE).toInt()
+            for (ch in 0 until srcCh) {
+                val sample32 = when (srcBps) {
+                    2 -> {
+                        val lo = data[s].toInt() and 0xFF
+                        val hi = data[s + 1].toInt()
+                        (hi shl 8 or lo) shl 16
                     }
-                    C.ENCODING_PCM_32BIT -> {
-                        ((data[s].toInt() and 0xFF) or ((data[s+1].toInt() and 0xFF) shl 8) or
-                                ((data[s+2].toInt() and 0xFF) shl 16) or (data[s+3].toInt() shl 24)) shr 16
+                    3 -> {
+                        val b0 = data[s].toInt() and 0xFF
+                        val b1 = data[s + 1].toInt() and 0xFF
+                        val b2 = data[s + 2].toInt()
+                        (b2 shl 16 or (b1 shl 8) or b0) shl 8
                     }
-                    C.ENCODING_PCM_24BIT -> {
-                        ((data[s].toInt() and 0xFF) or ((data[s+1].toInt() and 0xFF) shl 8) or
-                                (data[s+2].toInt() shl 16)) shr 8
+                    4 -> {
+                        if (encoding == C.ENCODING_PCM_FLOAT) {
+                            val v = ByteBuffer.wrap(data, s, 4).order(ByteOrder.LITTLE_ENDIAN).float
+                            (v.toDouble() * 2147483648.0).toInt().coerceIn(Int.MIN_VALUE, Int.MAX_VALUE)
+                        } else {
+                            (data[s].toInt() and 0xFF) or
+                                ((data[s + 1].toInt() and 0xFF) shl 8) or
+                                ((data[s + 2].toInt() and 0xFF) shl 16) or
+                                (data[s + 3].toInt() shl 24)
+                        }
                     }
                     else -> 0
-                }.coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
-                result[d++] = (sample16 and 0xFF).toByte()
-                result[d++] = ((sample16 shr 8) and 0xFF).toByte()
+                }
+
+                when (dstBps) {
+                    2 -> {
+                        val out = (sample32 shr 16).coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+                        result[d++] = (out and 0xFF).toByte()
+                        result[d++] = ((out shr 8) and 0xFF).toByte()
+                    }
+                    3 -> {
+                        val out = sample32 shr 8
+                        result[d++] = (out and 0xFF).toByte()
+                        result[d++] = ((out shr 8) and 0xFF).toByte()
+                        result[d++] = ((out shr 16) and 0xFF).toByte()
+                    }
+                    4 -> {
+                        result[d++] = (sample32 and 0xFF).toByte()
+                        result[d++] = ((sample32 shr 8) and 0xFF).toByte()
+                        result[d++] = ((sample32 shr 16) and 0xFF).toByte()
+                        result[d++] = ((sample32 shr 24) and 0xFF).toByte()
+                    }
+                }
                 s += srcBps
             }
-        }
-        return result
-    }
-
-    private fun convertChannels(data: ByteArray, srcCh: Int, dstCh: Int, bps: Int): ByteArray {
-        if (srcCh == dstCh) return data
-        val srcFS = srcCh * bps; val dstFS = dstCh * bps
-        val frames = data.size / srcFS
-        val result = ByteArray(frames * dstFS)
-        var s = 0; var d = 0
-        for (f in 0 until frames) {
             if (srcCh == 1 && dstCh == 2) {
-                System.arraycopy(data, s, result, d, bps); d += bps
-                System.arraycopy(data, s, result, d, bps); d += bps
-            } else if (srcCh == 2 && dstCh == 1) {
-                System.arraycopy(data, s, result, d, bps); d += bps
+                System.arraycopy(result, d - dstBps, result, d, dstBps)
+                d += dstBps
             }
-            s += srcFS
         }
         return result
     }

@@ -4,12 +4,10 @@ import android.content.Context
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.audio.AudioSink
 
-/**
- * 自定义 RenderersFactory：覆写 buildAudioSink() 注入 UsbExclusiveAudioSink
- */
 class UsbExclusiveRenderersFactory(
     context: Context,
-    private val usbAudio: UsbAudioNative,
+    private val stream: UsbAudioStream,
+    private val deviceInfo: UsbAudioDeviceInfo? = null,
 ) : DefaultRenderersFactory(context) {
 
     override fun buildAudioSink(
@@ -17,6 +15,8 @@ class UsbExclusiveRenderersFactory(
         enableFloatOutput: Boolean,
         enableAudioTrackPlaybackParams: Boolean,
     ): AudioSink? {
-        return UsbExclusiveAudioSink(usbAudio)
+        val sink = UsbExclusiveAudioSink(stream)
+        if (deviceInfo != null) sink.setDeviceInfo(deviceInfo)
+        return sink
     }
 }

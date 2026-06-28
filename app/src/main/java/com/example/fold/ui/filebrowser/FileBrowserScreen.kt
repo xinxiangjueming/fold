@@ -331,7 +331,23 @@ fun FileBrowserScreen(
                                         context.startActivity(intent)
                                     } catch (e: Exception) {
                                         FoldLogger.e(TAG, "Failed to open APK: ${e.message}")
-                                        android.widget.Toast.makeText(context, "无法安装: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                                        // 如果是权限问题，引导用户开启安装权限
+                                        if (e is android.content.ActivityNotFoundException || 
+                                            e.message?.contains("permission", ignoreCase = true) == true) {
+                                            try {
+                                                val settingsIntent = android.content.Intent(
+                                                    android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                                    android.net.Uri.parse("package:${context.packageName}")
+                                                )
+                                                settingsIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                context.startActivity(settingsIntent)
+                                                android.widget.Toast.makeText(context, "请开启「允许安装未知来源应用」后再试", android.widget.Toast.LENGTH_LONG).show()
+                                            } catch (_: Exception) {
+                                                android.widget.Toast.makeText(context, "无法安装: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                                            }
+                                        } else {
+                                            android.widget.Toast.makeText(context, "无法安装: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                                        }
                                     }
                                 }
                                 else -> {
@@ -365,8 +381,7 @@ fun FileBrowserScreen(
                 // 深浅色变化时更新 adapter 颜色并刷新所有可见 item
                 LaunchedEffect(isDark) {
                     FoldLogger.d(TAG, "isDark changed: $isDark, updating adapter colors")
-                    adapter.isDark = isDark
-                    adapter.notifyDataSetChanged()
+                    adapter.updateTheme(isDark)
                 }
                 AndroidView(
                     factory = { ctx ->
@@ -515,7 +530,7 @@ fun FileBrowserScreen(
             )
         }
 
-        // 长按操作菜单（屏幕级，只创建一个实例）
+        // 长按操作菜单（屏幕级，两列网格布局）
         if (menuTargetFile != null) {
             val file = menuTargetFile!!
             androidx.compose.ui.window.Popup(
@@ -523,68 +538,96 @@ fun FileBrowserScreen(
                 onDismissRequest = { menuTargetFile = null }
             ) {
                 Card(
-                    modifier = Modifier.fillMaxWidth(0.6f),
-                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth(0.85f),
+                    shape = RoundedCornerShape(20.dp),
                     elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
                 ) {
-                    Column(modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp)) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        // 文件名
                         Text(
                             text = file.name,
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                            modifier = Modifier.padding(bottom = 12.dp)
                         )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.action_rename)) },
-                            onClick = { menuTargetFile = null; viewModel.renameFile(file) },
-                            leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) }
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.action_copy)) },
-                            onClick = { menuTargetFile = null; viewModel.copyFile(file) },
-                            leadingIcon = { Icon(Icons.Filled.ContentCopy, contentDescription = null) }
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.action_move)) },
-                            onClick = { menuTargetFile = null; viewModel.moveFile(file) },
-                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = null) }
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.action_copy_path)) },
-                            onClick = { menuTargetFile = null; viewModel.copyPath(file) },
-                            leadingIcon = { Icon(Icons.Filled.ContentCopy, contentDescription = null) }
-                        )
+
+                        // 构建菜单项列表
+                        data class MenuItem(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector, val onClick: () -> Unit)
+                        val items = mutableListOf<MenuItem>()
+                        items.add(MenuItem(stringResource(R.string.action_rename), Icons.Filled.Edit) { menuTargetFile = null; viewModel.renameFile(file) })
+                        items.add(MenuItem(stringResource(R.string.action_copy), Icons.Filled.ContentCopy) { menuTargetFile = null; viewModel.copyFile(file) })
+                        items.add(MenuItem(stringResource(R.string.action_move), Icons.AutoMirrored.Filled.DriveFileMove) { menuTargetFile = null; viewModel.moveFile(file) })
+                        items.add(MenuItem(stringResource(R.string.action_copy_path), Icons.Filled.ContentPaste) { menuTargetFile = null; viewModel.copyPath(file) })
                         if (!file.isDirectory) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.action_share)) },
-                                onClick = { menuTargetFile = null; viewModel.shareFile(file) },
-                                leadingIcon = { Icon(Icons.Filled.Share, contentDescription = null) }
-                            )
+                            items.add(MenuItem(stringResource(R.string.action_share), Icons.Filled.Share) { menuTargetFile = null; viewModel.shareFile(file) })
                         }
                         if (com.example.fold.data.archive.ArchiveHelper.isArchive(file.name)) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.action_extract)) },
-                                onClick = { menuTargetFile = null; viewModel.extractArchive(file) },
-                                leadingIcon = { Icon(Icons.Filled.FolderZip, contentDescription = null) }
-                            )
+                            items.add(MenuItem(stringResource(R.string.action_extract), Icons.Filled.FolderZip) { menuTargetFile = null; viewModel.extractArchive(file) })
                         }
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.action_compress)) },
-                            onClick = { menuTargetFile = null; compressTargetFile = file },
-                            leadingIcon = { Icon(Icons.Filled.Archive, contentDescription = null) }
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.action_properties)) },
-                            onClick = { menuTargetFile = null; viewModel.showProperties(file) },
-                            leadingIcon = { Icon(Icons.Filled.Info, contentDescription = null) }
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.action_delete)) },
-                            onClick = { menuTargetFile = null; viewModel.deleteFile(file) },
-                            leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) }
-                        )
+                        items.add(MenuItem(stringResource(R.string.action_compress), Icons.Filled.Archive) { menuTargetFile = null; compressTargetFile = file })
+                        items.add(MenuItem(stringResource(R.string.action_properties), Icons.Filled.Info) { menuTargetFile = null; viewModel.showProperties(file) })
+                        items.add(MenuItem(stringResource(R.string.action_delete), Icons.Filled.Delete) { menuTargetFile = null; viewModel.deleteFile(file) })
+                        if (!file.isDirectory) {
+                            items.add(MenuItem(stringResource(R.string.action_open_with), Icons.Filled.OpenInNew) {
+                                menuTargetFile = null
+                                try {
+                                    val fileObj = java.io.File(file.path)
+                                    val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.provider", fileObj)
+                                    val mimeType = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.extension.lowercase()) ?: "*/*"
+                                    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                                        setDataAndType(uri, mimeType)
+                                        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                    context.startActivity(android.content.Intent.createChooser(intent, file.name))
+                                } catch (e: Exception) {
+                                    FoldLogger.e(TAG, "open with failed: ${e.message}")
+                                    Toast.makeText(context, context.getString(R.string.open_with_failed), Toast.LENGTH_SHORT).show()
+                                }
+                            })
+                        }
+
+                        // 两列网格
+                        val rows = items.chunked(2)
+                        rows.forEachIndexed { rowIndex, rowItems ->
+                            Row(modifier = Modifier.fillMaxWidth()) {
+                                rowItems.forEach { item ->
+                                    val isDelete = item.label == stringResource(R.string.action_delete)
+                                    Surface(
+                                        onClick = item.onClick,
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = Color.Transparent,
+                                        modifier = Modifier.weight(1f).padding(3.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 12.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = item.icon,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(20.dp),
+                                                tint = if (isDelete) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(
+                                                text = item.label,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = if (isDelete) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                }
+                                // 奇数个时补空白
+                                if (rowItems.size < 2) {
+                                    Spacer(Modifier.weight(1f))
+                                }
+                            }
+                        }
                     }
                 }
             }

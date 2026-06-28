@@ -98,6 +98,28 @@ fun AppNavGraph(navController: NavHostController) {
                 }
             }
     }
+    // 系统打开文件 → 导航到对应查看器
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        androidx.compose.runtime.snapshotFlow { MainActivity.pendingOpenFile.value }
+            .collect { filePath ->
+                if (filePath != null) {
+                    MainActivity.pendingOpenFile.value = null
+                    val ext = filePath.substringAfterLast('.').lowercase()
+                    FoldLogger.i("NavGraph", "open file from intent: $filePath (ext=$ext)")
+                    when (ext) {
+                        "jpg", "jpeg", "png", "gif", "webp", "bmp", "svg" ->
+                            navController.navigate(Routes.image(filePath))
+                        "mp4", "mkv", "avi", "mov", "flv", "wmv", "webm", "3gp", "ts" ->
+                            navController.navigate(Routes.video(filePath))
+                        "mp3", "wav", "flac", "aac", "ogg", "wma", "m4a", "opus", "ape" -> {
+                            navController.popBackStack(Routes.AUDIO_BASE, true)
+                            navController.navigate(Routes.audio(filePath))
+                        }
+                        else -> navController.navigate(Routes.reader(filePath))
+                    }
+                }
+            }
+    }
     // 每次重组都读取，确保切换后立即生效（不需要重启app）
     val calculatorMode = context.getSharedPreferences("file_sort", android.content.Context.MODE_PRIVATE)
         .getBoolean("calculator_mode", false)

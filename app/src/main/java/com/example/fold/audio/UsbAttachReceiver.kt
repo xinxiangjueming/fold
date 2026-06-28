@@ -32,8 +32,14 @@ class UsbAttachReceiver : BroadcastReceiver() {
         val exclusive = MusicPlayerHolder.exclusiveDevice ?: return
         if (device.deviceName != exclusive.usbDevice.deviceName) return
         Log.w(TAG, "Active USB DAC detached, disabling exclusive mode")
-        MusicPlayerHolder.releasePlayer()
-        MusicPlayerHolder.disableExclusiveMode(context.applicationContext)
+        try {
+            MusicPlayerHolder.releasePlayer()
+            MusicPlayerHolder.disableExclusiveMode(context.applicationContext)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during detach cleanup: ${e.message}")
+            // Force reset state even if cleanup fails
+            MusicPlayerHolder.forceReset()
+        }
     }
 
     companion object {
