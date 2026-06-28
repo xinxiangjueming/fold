@@ -55,20 +55,26 @@ fun PredictiveBackScreen(
 ) {
     var progress by remember { mutableFloatStateOf(0f) }
     var isGestureActive by remember { mutableStateOf(false) }
+    var isFinishing by remember { mutableStateOf(false) }
 
     PredictiveBackHandler(enabled = true) { backEvent ->
         try {
-            android.util.Log.d("PredictiveBack", "Gesture started, screenshot=${PredictiveBackManager.previousScreenshot != null}")
+            android.util.Log.d("PredictiveBack", "Gesture STARTED, screenshot=${PredictiveBackManager.previousScreenshot != null}")
             backEvent.collect { event ->
                 progress = event.progress
                 isGestureActive = true
+                android.util.Log.d("PredictiveBack", "Gesture PROGRESS: progress=${event.progress}")
             }
-            // 手势完成：直接导航，不回弹
-            android.util.Log.d("PredictiveBack", "Gesture completed, calling onBack() immediately")
+            // 手势完成
+            isFinishing = true
+            progress = 1f
+            android.util.Log.d("PredictiveBack", "Gesture COMPLETED, isFinishing=true, progress=1f")
             onBack()
+            android.util.Log.d("PredictiveBack", "onBack() RETURNED")
         } catch (e: CancellationException) {
-            android.util.Log.d("PredictiveBack", "Gesture cancelled")
+            android.util.Log.d("PredictiveBack", "Gesture CANCELLED, resetting state")
             isGestureActive = false
+            isFinishing = false
             progress = 0f
         }
     }

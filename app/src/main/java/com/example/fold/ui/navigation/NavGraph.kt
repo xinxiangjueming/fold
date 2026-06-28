@@ -77,6 +77,7 @@ fun AppNavGraph(navController: NavHostController) {
 
     // 包装 navigate，在跳转前截取当前页面
     val navigateWithCapture: (String) -> Unit = { route ->
+        FoldLogger.d("PredictiveBack", "navigateWithCapture: capturing screen before navigating to $route")
         com.example.fold.ui.common.PredictiveBackManager.captureCurrentScreen(view)
         navController.navigate(route)
     }
@@ -232,14 +233,23 @@ fun AppNavGraph(navController: NavHostController) {
 
         composable(
             route = Routes.READER,
-            arguments = listOf(navArgument("filePath") { type = NavType.StringType })
+            arguments = listOf(navArgument("filePath") { type = NavType.StringType }),
+            popExitTransition = { fadeOut(tween(300)) }
         ) { backStackEntry ->
             val encodedPath = backStackEntry.arguments?.getString("filePath") ?: ""
             val filePath = android.net.Uri.decode(encodedPath)
-            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
+            PredictiveBackScreen(onBack = {
+                FoldLogger.d("PredictiveBack", "ReaderScreen PredictiveBackScreen.onBack: calling popBackStack()")
+                navController.popBackStack()
+                FoldLogger.d("PredictiveBack", "ReaderScreen PredictiveBackScreen.onBack: popBackStack() returned")
+            }) {
                 ReaderScreen(
                     filePath = filePath,
-                    onBack = { navController.popBackStack() }
+                    onBack = {
+                        FoldLogger.d("PredictiveBack", "ReaderScreen onBack: calling popBackStack()")
+                        navController.popBackStack()
+                        FoldLogger.d("PredictiveBack", "ReaderScreen onBack: popBackStack() returned")
+                    }
                 )
             }
         }
