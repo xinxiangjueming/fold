@@ -160,6 +160,8 @@
     <string name="prop_size">大小</string>
     <string name="prop_type">类型</string>
     <string name="prop_modified">修改时间</string>
+    <string name="prop_md5">MD5</string>
+    <string name="prop_calculating">计算中…</string>
 
     <!-- 权限 -->
     <string name="permission_title">需要存储权限</string>

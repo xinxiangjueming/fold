@@ -47,6 +47,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 // 共享的日期格式器，ThreadLocal 保证线程安全
 private const val TAG = "FoldUI"
@@ -726,6 +728,29 @@ private fun PropertiesDialog(file: FileItem, onDismiss: () -> Unit) {
     val modifiedText = remember(file.lastModifiedTimestamp) {
         SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(file.lastModifiedTimestamp)
     }
+
+    val calculating = stringResource(R.string.prop_calculating)
+
+    // 文件夹大小
+    var folderSize by remember { mutableStateOf(if (file.isDirectory) calculating else null) }
+    LaunchedEffect(file.path, file.isDirectory) {
+        if (file.isDirectory) {
+            folderSize = withContext(Dispatchers.IO) {
+                formatFileSize(calcFolderSize(java.io.File(file.path)))
+            }
+        }
+    }
+
+    // 文件 MD5
+    var fileMd5 by remember { mutableStateOf(if (!file.isDirectory) calculating else null) }
+    LaunchedEffect(file.path, file.isDirectory) {
+        if (!file.isDirectory) {
+            fileMd5 = withContext(Dispatchers.IO) {
+                calcMd5(java.io.File(file.path))
+            }
+        }
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.action_properties), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) },
@@ -733,9 +758,14 @@ private fun PropertiesDialog(file: FileItem, onDismiss: () -> Unit) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 PropertyRow(stringResource(R.string.prop_name), file.name)
                 PropertyRow(stringResource(R.string.prop_path), file.path)
-                if (!file.isDirectory) PropertyRow(stringResource(R.string.prop_size), formatFileSize(file.size))
+                if (file.isDirectory) {
+                    folderSize?.let { PropertyRow(stringResource(R.string.prop_size), it) }
+                } else {
+                    PropertyRow(stringResource(R.string.prop_size), formatFileSize(file.size))
+                }
                 PropertyRow(stringResource(R.string.prop_type), if (file.isDirectory) stringResource(R.string.file_type_folder) else file.extension.uppercase())
                 PropertyRow(stringResource(R.string.prop_modified), modifiedText)
+                fileMd5?.let { PropertyRow(stringResource(R.string.prop_md5), it) }
             }
         },
         confirmButton = {
@@ -745,6 +775,36 @@ private fun PropertiesDialog(file: FileItem, onDismiss: () -> Unit) {
         },
         shape = RoundedCornerShape(16.dp)
     )
+}
+
+private fun calcFolderSize(dir: java.io.File): Long {
+    if (!dir.exists() || !dir.isDirectory) return 0L
+    var total = 0L
+    val stack = ArrayDeque<java.io.File>()
+    stack.addLast(dir)
+    while (stack.isNotEmpty()) {
+        val f = stack.removeLast()
+        val children = f.listFiles() ?: continue
+        for (c in children) {
+            if (c.isDirectory) stack.addLast(c) else total += c.length()
+        }
+    }
+    return total
+}
+
+private fun calcMd5(file: java.io.File): String {
+    if (!file.exists() || !file.isFile) return ""
+    return try {
+        val digest = java.security.MessageDigest.getInstance("MD5")
+        file.inputStream().buffered(8192).use { input ->
+            val buf = ByteArray(8192)
+            var read: Int
+            while (input.read(buf).also { read = it } != -1) {
+                digest.update(buf, 0, read)
+            }
+        }
+        digest.digest().joinToString("") { "%02x".format(it) }
+    } catch (_: Exception) { "" }
 }
 
 @Composable

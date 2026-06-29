@@ -153,6 +153,8 @@
     <string name="prop_size">Size</string>
     <string name="prop_type">Type</string>
     <string name="prop_modified">Modified</string>
+    <string name="prop_md5">MD5</string>
+    <string name="prop_calculating">Calculating…</string>
 
     <!-- Permission -->
     <string name="permission_title">Storage Permission Required</string>
