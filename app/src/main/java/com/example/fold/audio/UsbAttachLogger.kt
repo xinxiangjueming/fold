@@ -37,16 +37,11 @@ object UsbAttachLogger {
      * 初始化：仅记录日志，USB_DEVICE_ATTACHED 通过 manifest receiver 接收
      */
     fun start(context: Context) {
-        Log.i(TAG, "UsbAttachLogger ready (manifest receiver handles attach)")
+        Log.i(TAG, "UsbAttachLogger disabled")
     }
 
-    /**
-     * 处理 USB 设备插入（由 UsbAttachReceiver 调用）
-     */
     fun onDeviceAttached(context: Context, device: UsbDevice) {
-        if (!isUsbAudioDevice(device)) return
-        Log.i(TAG, "USB Audio attached: ${device.deviceName}")
-        handleDevice(context, device)
+        // 暂时禁用，不处理 USB 设备插入
     }
 
     private fun isUsbAudioDevice(device: UsbDevice): Boolean {

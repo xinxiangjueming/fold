@@ -73,6 +73,15 @@ data class FileBrowserState(
     val compressProgress: Float = -1f,  // -1=隐藏, 0..1=进度
     val compressFileName: String = "",
     val showBatchCompressDialog: Boolean = false,
+    // 外部存储设备
+    val storageVolumes: List<StorageVolume> = emptyList(),
+)
+
+data class StorageVolume(
+    val name: String,
+    val path: String,
+    val isRemovable: Boolean,
+    val isReadOnly: Boolean = false,
 )
 
 private const val TAG = "FoldVM"
@@ -179,6 +188,9 @@ class FileBrowserViewModel : ViewModel() {
             _state.update { it.copy(rootAvailable = hasRoot) }
         }
 
+        // 检测外部存储设备（OTG、SD卡）
+        detectStorageVolumes()
+
         // Shizuku 服务绑定成功后，自动刷新受限目录
         ShizukuHelper.onServiceReady = {
             if (ShizukuHelper.needsShizuku(_state.value.currentPath)) {
@@ -203,6 +215,33 @@ class FileBrowserViewModel : ViewModel() {
                 }
             }
         }
+    }
+
+    private fun detectStorageVolumes() {
+        val volumes = mutableListOf<StorageVolume>()
+        try {
+            // 内部存储
+            volumes.add(StorageVolume("内部存储", "/storage/emulated/0", false))
+            // 检测外部存储
+            val sm = app.getSystemService(Context.STORAGE_SERVICE) as android.os.storage.StorageManager
+            for (volume in sm.storageVolumes) {
+                val path = volume.directory?.absolutePath ?: continue
+                if (path == "/storage/emulated/0") continue
+                val isRemovable = volume.isRemovable
+                val isReadOnly = volume.state == "mounted_ro"
+                val name = when {
+                    path.contains("usb") || path.contains("otg") -> "OTG"
+                    path.contains("sdcard1") || path.contains("ext_sd") -> "SD卡"
+                    isRemovable -> "外部存储"
+                    else -> continue
+                }
+                volumes.add(StorageVolume(name, path, isRemovable, isReadOnly))
+                FoldLogger.i(TAG, "detectStorageVolumes: found $name at $path (removable=$isRemovable, readOnly=$isReadOnly, state=${volume.state})")
+            }
+        } catch (e: Exception) {
+            FoldLogger.e(TAG, "detectStorageVolumes: failed", e)
+        }
+        _state.update { it.copy(storageVolumes = volumes) }
     }
 
     fun navigateTo(path: String) {
@@ -280,9 +319,16 @@ class FileBrowserViewModel : ViewModel() {
 
     fun navigateUp() {
         val current = _state.value.currentPath
+        val root = localFileProvider.getRootPath()
         FoldLogger.d(TAG, "navigateUp: current=$current")
-        if (current == localFileProvider.getRootPath()) return
-        navigateTo(current.substringBeforeLast('/').ifEmpty { "/" })
+        if (current == root) return
+        val parent = current.substringBeforeLast('/').ifEmpty { "/" }
+        // 从外部存储（OTG/SD卡）返回时，直接回到内部存储根目录
+        if (!current.startsWith(root) && (parent == "/storage" || parent == "/")) {
+            navigateTo(root)
+            return
+        }
+        navigateTo(parent)
     }
 
     fun onFileClick(file: FileItem) {
@@ -294,17 +340,29 @@ class FileBrowserViewModel : ViewModel() {
         FoldLogger.i(TAG, "deleteFile: name=${file.name}, path=${file.path}")
         viewModelScope.launch(Dispatchers.IO) {
             try {
+                val f = File(file.path)
+                val canWrite = f.canWrite() || f.parentFile?.canWrite() == true
+                FoldLogger.i(TAG, "deleteFile: canWrite=$canWrite, exists=${f.exists()}, path=${file.path}")
+                // 检查是否可写（OTG/SD卡可能被挂载为只读）
+                if (!canWrite) {
+                    FoldLogger.w(TAG, "deleteFile: path not writable")
+                    withContext(Dispatchers.Main) {
+                        _state.update { it.copy(error = "存储设备只读，无法删除") }
+                    }
+                    return@launch
+                }
                 val success = if (ShizukuHelper.needsShizuku(file.path) && ShizukuHelper.granted.value) {
                     ShizukuHelper.deleteRestricted(file.path).isSuccess
                 } else {
-                    val f = File(file.path)
                     if (f.exists()) {
-                        if (_trashEnabled.value) {
+                        val deleted = if (_trashEnabled.value) {
                             moveToTrash(f)
+                            true
                         } else {
                             f.deleteRecursively()
                         }
-                        true
+                        FoldLogger.i(TAG, "deleteFile: deleteRecursively result=$deleted, name=${file.name}")
+                        deleted
                     } else {
                         false
                     }
@@ -316,7 +374,7 @@ class FileBrowserViewModel : ViewModel() {
                     _files.value = updated
                     _state.update { s -> s.copy(files = updated) }
                 } else {
-                    FoldLogger.w(TAG, "deleteFile: failed, name=${file.name}")
+                    FoldLogger.w(TAG, "deleteFile: failed, name=${file.name}, exists=${File(file.path).exists()}, canWrite=${File(file.path).canWrite()}")
                     _state.update { it.copy(error = app.getString(R.string.delete_failed, file.name)) }
                 }
             } catch (e: Exception) {

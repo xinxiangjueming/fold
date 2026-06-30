@@ -29,12 +29,19 @@ class MainActivity : AppCompatActivity() {
         var pendingNavigateCalculator = androidx.compose.runtime.mutableStateOf(false)
         /** 系统打开文件：等待 Compose 就绪后导航到对应查看器 */
         var pendingOpenFile = androidx.compose.runtime.mutableStateOf<String?>(null)
+        /** TTS 通知点击：等待 NavGraph 就绪后导航到阅读器 */
+        var pendingOpenReader = androidx.compose.runtime.mutableStateOf<String?>(null)
         /** 阅读器是否处于活跃状态（用于音量键翻页判断） */
         @Volatile
         var readerActive = false
         /** 息屏归隐：等待 onResume 时导航到计算器 */
         @Volatile
         var pendingStealthNavigate = false
+        /** Activity 重建时恢复的路由 */
+        var pendingRestoreRoute = androidx.compose.runtime.mutableStateOf<String?>(null)
+        /** 当前导航路由（由 NavGraph 更新） */
+        @Volatile
+        var currentNavRoute: String? = null
 
         /** 切换伪装后更新 Activity intent，防止系统用已禁用的 alias 恢复任务 */
         fun updateActivityIntent(activity: MainActivity, calculatorMode: Boolean) {
@@ -81,6 +88,13 @@ class MainActivity : AppCompatActivity() {
         if (intent?.getBooleanExtra("OPEN_PLAYER", false) == true) {
             pendingOpenPlayer.value = true
         }
+        // TTS 通知栏点击 → 打开阅读器
+        if (intent?.getBooleanExtra("OPEN_READER", false) == true) {
+            val path = intent.getStringExtra("READER_PATH")
+            if (!path.isNullOrEmpty()) {
+                pendingOpenReader.value = path
+            }
+        }
 
         // 系统打开文件（ACTION_VIEW）
         handleViewIntent(intent)
@@ -89,6 +103,23 @@ class MainActivity : AppCompatActivity() {
         val isCalcMode = getSharedPreferences("file_sort", MODE_PRIVATE)
             .getBoolean("calculator_mode", false)
         updateActivityIntent(this, isCalcMode)
+
+        // Activity 重建时恢复路由（从 savedInstanceState 或 SharedPreferences）
+        val savedRoute = savedInstanceState?.getString("current_route")
+            ?: getSharedPreferences("nav_state", MODE_PRIVATE).getString("current_route", null)
+        if (savedRoute != null && savedRoute !in listOf("file_browser", "calculator")) {
+            FoldLogger.i(TAG, "onCreate: restoring route=$savedRoute")
+            pendingRestoreRoute.value = savedRoute
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        val route = currentNavRoute
+        if (route != null) {
+            outState.putString("current_route", route)
+            FoldLogger.d(TAG, "onSaveInstanceState: saved route=$route")
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -97,6 +128,13 @@ class MainActivity : AppCompatActivity() {
         if (intent.getBooleanExtra("OPEN_PLAYER", false)) {
             FoldLogger.i(TAG, "onNewIntent: OPEN_PLAYER")
             pendingOpenPlayer.value = true
+        }
+        if (intent.getBooleanExtra("OPEN_READER", false)) {
+            val path = intent.getStringExtra("READER_PATH")
+            if (!path.isNullOrEmpty()) {
+                FoldLogger.i(TAG, "onNewIntent: OPEN_READER path=$path")
+                pendingOpenReader.value = path
+            }
         }
         handleViewIntent(intent)
     }

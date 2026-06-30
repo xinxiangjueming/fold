@@ -101,23 +101,23 @@ fun FileBrowserScreen(
     var showMoreMenu by remember { mutableStateOf(false) }
     var compressTargetFile by remember { mutableStateOf<FileItem?>(null) }
 
-    var backPressedTime by remember { mutableStateOf(0L) }
     var backProgress by remember { mutableFloatStateOf(0f) }
     var isBackGestureActive by remember { mutableStateOf(false) }
-    var backScreenshot by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
     var searchActive by remember { mutableStateOf(false) }
     var searchText by remember { mutableStateOf("") }
 
     androidx.activity.compose.PredictiveBackHandler(enabled = state.currentPath != getDisplayRoot(state) || searchActive || state.selectionMode) { backEvent ->
         try {
-            backScreenshot = try { view.drawToBitmap() } catch (e: Exception) { null }
+            android.util.Log.d("PredictiveBack", "FileBrowser: gesture START, screenshot=${com.example.fold.ui.common.PredictiveBackManager.previousScreenshot != null}")
             backEvent.collect { event ->
                 backProgress = event.progress
                 isBackGestureActive = true
+                if (event.progress < 0.05f) {
+                    android.util.Log.d("PredictiveBack", "FileBrowser: gesture PROGRESS=${event.progress}, screenshot=${com.example.fold.ui.common.PredictiveBackManager.previousScreenshot != null}")
+                }
             }
             isBackGestureActive = false
             backProgress = 0f
-            backScreenshot = null
             if (state.selectionMode) {
                 viewModel.toggleSelectionMode()
             } else if (searchActive) {
@@ -127,19 +127,21 @@ fun FileBrowserScreen(
             } else {
                 viewModel.navigateUp()
             }
+            com.example.fold.ui.common.PredictiveBackManager.clear()
         } catch (e: kotlinx.coroutines.CancellationException) {
             isBackGestureActive = false
             backProgress = 0f
-            backScreenshot = null
         }
     }
 
     val backScale = 1f - (backProgress * 0.08f)
     val backTranslationX = backProgress * 100f
-    val backCornerRadius = backProgress * 24f
+    val backCornerRadius = 16f + (backProgress * 8f)
 
     Box(Modifier.fillMaxSize()) {
-        backScreenshot?.let { bmp ->
+        val prevScreenshot = com.example.fold.ui.common.PredictiveBackManager.previousScreenshot
+        android.util.Log.d("PredictiveBack", "FileBrowser: rendering, backProgress=$backProgress, screenshot=${prevScreenshot != null}")
+        prevScreenshot?.let { bmp ->
             androidx.compose.foundation.Image(
                 bitmap = bmp.asImageBitmap(),
                 contentDescription = null,
@@ -150,16 +152,15 @@ fun FileBrowserScreen(
         Box(
             Modifier
                 .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background)
                 .graphicsLayer {
                     scaleX = backScale
                     scaleY = backScale
                     translationX = backTranslationX
-                    shadowElevation = backProgress * 20f
+                    shape = RoundedCornerShape(backCornerRadius.dp)
+                    clip = true
                 }
-                .clip(RoundedCornerShape(backCornerRadius.dp))
         ) {
-            Column(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
                 // TopAppBar
                 TopAppBar(
                     title = {
@@ -348,6 +349,24 @@ fun FileBrowserScreen(
                                         onClick = { showMoreMenu = false; onNavigateToTrash() },
                                         leadingIcon = { Icon(Icons.Filled.DeleteSweep, contentDescription = null) }
                                     )
+                                    if (state.storageVolumes.size > 1) {
+                                        HorizontalDivider()
+                                        state.storageVolumes.drop(1).forEach { volume ->
+                                            DropdownMenuItem(
+                                                text = { Text(volume.name) },
+                                                onClick = {
+                                                    showMoreMenu = false
+                                                    viewModel.navigateTo(volume.path)
+                                                },
+                                                leadingIcon = {
+                                                    Icon(
+                                                        if (volume.isRemovable) Icons.Filled.Usb else Icons.Filled.Storage,
+                                                        contentDescription = null
+                                                    )
+                                                }
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -426,7 +445,9 @@ fun FileBrowserScreen(
                             onClick = { file ->
                                 when {
                                     file.isDirectory -> {
+                                        android.util.Log.d("PredictiveBack", "FileBrowser: capturing screen before navigate, view=${view.width}x${view.height}")
                                         com.example.fold.ui.common.PredictiveBackManager.captureCurrentScreen(view)
+                                        android.util.Log.d("PredictiveBack", "FileBrowser: after capture, screenshot=${com.example.fold.ui.common.PredictiveBackManager.previousScreenshot != null}, size=${com.example.fold.ui.common.PredictiveBackManager.previousScreenshot?.width}x${com.example.fold.ui.common.PredictiveBackManager.previousScreenshot?.height}")
                                         viewModel.onFileClick(file)
                                     }
                                     file.extension.lowercase() in setOf("jpg","jpeg","png","gif","webp","bmp","svg") -> onImageClick(file.path)

@@ -258,19 +258,13 @@ fun AudioPlayerScreen(
                 }
             },
             actions = {
-                // USB 独占模式按钮
-                if (MusicPlayerHolder.isExclusiveSupported()) {
-                    IconButton(onClick = {
-                        android.util.Log.i("AudioPlayerScreen", "USB button clicked, showUsbDialog=$showUsbDialog")
-                        showUsbDialog = true
-                    }) {
-                        Icon(
-                            Icons.Default.Usb,
-                            contentDescription = "USB 独占",
-                            tint = if (isExclusive) MaterialTheme.colorScheme.primary else onSurfaceVar
-                        )
-                    }
-                }
+                // USB 独占模式按钮 — 暂时禁用
+                // if (MusicPlayerHolder.isExclusiveSupported()) {
+                //     IconButton(onClick = { showUsbDialog = true }) {
+                //         Icon(Icons.Default.Usb, contentDescription = "USB 独占",
+                //             tint = if (isExclusive) MaterialTheme.colorScheme.primary else onSurfaceVar)
+                //     }
+                // }
                 if (state.sleepRemaining > 0) {
                     Text("${state.sleepRemaining}min",
                         style = MaterialTheme.typography.labelSmall,

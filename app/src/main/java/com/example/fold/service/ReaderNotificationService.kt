@@ -34,6 +34,9 @@ class ReaderNotificationService : Service() {
 
     companion object {
         private var instance: ReaderNotificationService? = null
+        /** 当前朗读的文件路径（供通知点击跳转用） */
+        @Volatile
+        var currentFilePath: String = ""
 
         fun start(context: Context) {
             val intent = Intent(context, ReaderNotificationService::class.java)
@@ -234,7 +237,11 @@ class ReaderNotificationService : Service() {
 
         val contentIntent = PendingIntent.getActivity(
             this, 0,
-            Intent(this, MainActivity::class.java),
+            Intent(this, MainActivity::class.java).apply {
+                putExtra("OPEN_READER", true)
+                putExtra("READER_PATH", currentFilePath)
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+            },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
@@ -315,7 +322,11 @@ class ReaderNotificationService : Service() {
     ) {
         val contentIntent = PendingIntent.getActivity(
             this, 1,
-            Intent(this, MainActivity::class.java),
+            Intent(this, MainActivity::class.java).apply {
+                putExtra("OPEN_READER", true)
+                putExtra("READER_PATH", currentFilePath)
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+            },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 

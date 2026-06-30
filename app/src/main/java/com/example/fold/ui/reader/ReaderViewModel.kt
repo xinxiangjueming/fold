@@ -532,6 +532,7 @@ class ReaderViewModel : ViewModel() {
         val idx = _state.value.currentChapterIndex
         val paragraphs = getProcessedChapterParagraphs(idx)
         ttsParagraphs = paragraphs
+        ReaderNotificationService.currentFilePath = _state.value.filePath
         FoldLogger.d(TAG, "startTts: chapter=$idx, paragraphs=${paragraphs.size}")
         ttsManager.startSpeaking(paragraphs)
         ReaderNotificationService.start(context)

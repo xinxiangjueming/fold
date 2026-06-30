@@ -379,7 +379,7 @@ object UsbAudioDeviceManager {
 
         val result = connection.controlTransfer(
             0x21, 0x01, 0x0100,
-            (csId shl 8) or 0x0100,
+            (csId shl 8), // Clock source is on AudioControl interface 0
             data, data.size, 1000
         )
         if (result < 0) {
@@ -393,7 +393,7 @@ object UsbAudioDeviceManager {
         val data = ByteArray(1)
         val result = connection.controlTransfer(
             0xA1, 0x81, 0x0100,
-            (csId shl 8) or 0x0100,
+            (csId shl 8), // Clock source is on AudioControl interface 0
             data, data.size, 1000
         )
         if (result < 0) {

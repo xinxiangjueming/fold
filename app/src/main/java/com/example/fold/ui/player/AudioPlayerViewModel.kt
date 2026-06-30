@@ -65,14 +65,60 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
     fun init(filePath: String, playlist: List<String>) {
         com.example.fold.util.FoldLogger.i(TAG, "=== init START === filePath=$filePath, lastFilePath=${MusicPlayerHolder.lastFilePath}, isActive=${MusicPlayerHolder.isActive()}, playlistSize=${MusicPlayerHolder.playlist.size}, mediaIdx=${MusicPlayerHolder.exoPlayer?.currentMediaItemIndex}, argPlaylist=${playlist.size}")
 
-        // 如果正在播放且播放器还在，直接复用，用当前播放的文件更新 UI
+        // 如果正在播放且播放器还在，检查是否是同一首歌
         if (MusicPlayerHolder.isActive() && MusicPlayerHolder.playlist.isNotEmpty()) {
             exoPlayer = MusicPlayerHolder.exoPlayer!!
             resolvedPlaylist = MusicPlayerHolder.playlist
             val currentIdx = exoPlayer.currentMediaItemIndex
             val currentPath = resolvedPlaylist.getOrElse(currentIdx) { filePath }
-            com.example.fold.util.FoldLogger.i(TAG, "  Reusing player. currentIdx=$currentIdx, currentPath=$currentPath")
 
+            // 如果点击的是新歌（不在当前播放位置），需要切换
+            if (filePath != currentPath) {
+                val targetIdx = resolvedPlaylist.indexOf(filePath)
+                if (targetIdx >= 0) {
+                    // 新歌在当前播放列表中，直接切过去
+                    com.example.fold.util.FoldLogger.i(TAG, "  Song in playlist, seeking to idx=$targetIdx")
+                    exoPlayer.seekToDefaultPosition(targetIdx)
+                } else {
+                    // 新歌不在播放列表中，重新播放
+                    com.example.fold.util.FoldLogger.i(TAG, "  Song not in playlist, starting new playback")
+                    MusicPlayerHolder.lastFilePath = filePath
+                    resolvedPlaylist = if (playlist.isNotEmpty()) playlist
+                    else {
+                        val dir = File(filePath).parentFile
+                        dir?.listFiles()
+                            ?.filter { it.isFile && it.extension.lowercase() in audioExtensions }
+                            ?.sortedBy { it.name }
+                            ?.map { it.absolutePath }
+                            ?: listOf(filePath)
+                    }
+                    val initialIndex = resolvedPlaylist.indexOf(filePath).coerceAtLeast(0)
+                    MusicPlayerHolder.loadPlaylist(context, resolvedPlaylist, initialIndex)
+                }
+                // 更新 UI 到新歌
+                MusicPlayerHolder.lastFilePath = filePath
+                val newIdx = if (targetIdx >= 0) targetIdx else resolvedPlaylist.indexOf(filePath).coerceAtLeast(0)
+                val newPath = resolvedPlaylist.getOrElse(newIdx) { filePath }
+                _state.value = _state.value.copy(
+                    title = newPath.substringAfterLast('/').substringBeforeLast('.'),
+                    currentIndex = newIdx,
+                    playlistSize = resolvedPlaylist.size,
+                    playlistPaths = resolvedPlaylist,
+                    audioSessionId = exoPlayer.audioSessionId,
+                    isPlaying = exoPlayer.isPlaying,
+                    duration = 0L,
+                    currentPosition = 0L,
+                    initialized = true
+                )
+                loadAlbumArt(newPath)
+                loadLyrics(newPath)
+                attachListeners()
+                startPolling()
+                return
+            }
+
+            // 同一首歌，复用播放器
+            com.example.fold.util.FoldLogger.i(TAG, "  Reusing player. currentIdx=$currentIdx, currentPath=$currentPath")
             _state.value = _state.value.copy(
                 title = currentPath.substringAfterLast('/').substringBeforeLast('.'),
                 currentIndex = currentIdx,

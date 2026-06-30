@@ -28,11 +28,22 @@ object PredictiveBackManager {
 
     // 调用时机：在 navigate() 之前调用，截取当前页面
     fun captureCurrentScreen(view: android.view.View) {
-        previousScreenshot?.recycle()
-        previousScreenshot = try {
-            view.drawToBitmap()
+        val newScreenshot = try {
+            if (view.width <= 0 || view.height <= 0) {
+                null
+            } else {
+                val bmp = android.graphics.Bitmap.createBitmap(view.width, view.height, android.graphics.Bitmap.Config.ARGB_8888)
+                val canvas = android.graphics.Canvas(bmp)
+                view.draw(canvas)
+                bmp
+            }
         } catch (e: Exception) {
+            android.util.Log.e("PredictiveBack", "captureCurrentScreen failed: ${e.message}")
             null
+        }
+        if (newScreenshot != null) {
+            previousScreenshot?.recycle()
+            previousScreenshot = newScreenshot
         }
         android.util.Log.d("PredictiveBack", "captureCurrentScreen: screenshot=${previousScreenshot != null}, size=${previousScreenshot?.width}x${previousScreenshot?.height}")
     }
@@ -81,7 +92,7 @@ fun PredictiveBackScreen(
 
     val scale = 1f - (progress * 0.08f)
     val translationX = progress * 100f
-    val cornerRadius = progress * 24f
+    val cornerRadius = 16f + (progress * 8f)
 
     if (progress > 0.01f) {
         android.util.Log.d("PredictiveBack", "Rendering: progress=$progress scale=$scale")
@@ -106,8 +117,9 @@ fun PredictiveBackScreen(
                     scaleY = scale
                     this.translationX = translationX
                     shadowElevation = progress * 20f
+                    shape = RoundedCornerShape(cornerRadius.dp)
+                    clip = true
                 }
-                .clip(RoundedCornerShape(cornerRadius.dp))
         ) {
             content()
         }

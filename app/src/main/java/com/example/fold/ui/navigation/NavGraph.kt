@@ -98,6 +98,19 @@ fun AppNavGraph(navController: NavHostController) {
                 }
             }
     }
+    // TTS 通知栏点击 → 自动打开阅读器
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        androidx.compose.runtime.snapshotFlow { MainActivity.pendingOpenReader.value }
+            .collect { filePath ->
+                if (filePath != null) {
+                    MainActivity.pendingOpenReader.value = null
+                    FoldLogger.i("NavGraph", "auto-navigate to reader: $filePath")
+                    navController.navigate(Routes.reader(filePath)) {
+                        launchSingleTop = true
+                    }
+                }
+            }
+    }
     // 息屏归隐 → 导航到计算器
     androidx.compose.runtime.LaunchedEffect(Unit) {
         androidx.compose.runtime.snapshotFlow { MainActivity.pendingNavigateCalculator.value }
@@ -143,6 +156,29 @@ fun AppNavGraph(navController: NavHostController) {
     val currentRoute = navBackStackEntry?.destination?.route
     val miniState by MiniPlayerState.state.collectAsState()
     val showMiniPlayer = currentRoute != Routes.AUDIO && currentRoute != Routes.EQ && miniState.filePath.isNotEmpty() && currentRoute != null
+
+    // 同步当前路由到 Activity（用于 savedInstanceState 恢复）+ SharedPreferences 持久化
+    androidx.compose.runtime.LaunchedEffect(currentRoute) {
+        if (currentRoute != null) {
+            MainActivity.currentNavRoute = currentRoute
+            context.getSharedPreferences("nav_state", android.content.Context.MODE_PRIVATE)
+                .edit().putString("current_route", currentRoute).apply()
+        }
+    }
+
+    // Activity 重建时恢复路由
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        androidx.compose.runtime.snapshotFlow { MainActivity.pendingRestoreRoute.value }
+            .collect { route ->
+                if (route != null) {
+                    MainActivity.pendingRestoreRoute.value = null
+                    FoldLogger.i("NavGraph", "restoring route: $route")
+                    navController.navigate(route) {
+                        launchSingleTop = true
+                    }
+                }
+            }
+    }
 
     // 当 ViewModel 销毁但 MusicPlayerHolder 仍有活跃播放器时，同步 MiniPlayerState
     androidx.compose.runtime.LaunchedEffect(currentRoute) {

@@ -605,6 +605,16 @@ Java_com_example_fold_audio_UsbAudioStream_nativeCreate(
     }
     LOGI("nativeCreate: claimed interface %d", ifId);
 
+    // USB reset to put device in a clean state before configuration
+    ret = ioctl(fd, USBDEVFS_RESET, nullptr);
+    if (ret < 0) {
+        LOGW("nativeCreate: USBDEVFS_RESET failed: %s (errno=%d)", strerror(errno), errno);
+    } else {
+        LOGI("nativeCreate: USB device reset OK");
+        // Re-claim interfaces after reset (reset releases all claims)
+        ioctl(fd, USBDEVFS_CLAIMINTERFACE, &ifnum);
+    }
+
     // Allocate ring buffers and feedback URB at creation time (like decent-player)
     allocRing(ctx);
     if (!ctx->ringAllocated) {
@@ -660,7 +670,7 @@ Java_com_example_fold_audio_UsbAudioStream_nativeSetSampleRate(
     ctrl.bRequestType = 0x21; // CLASS | INTERFACE | OUT
     ctrl.bRequest     = 0x01; // UAC2_CS_CUR
     ctrl.wValue       = 0x0100; // SAM_FREQ << 8
-    ctrl.wIndex       = (uint16_t)(ctx->interfaceId | (csId << 8));
+    ctrl.wIndex       = (uint16_t)(csId << 8); // Clock source is on AudioControl interface 0
     ctrl.wLength      = 4;
     ctrl.timeout      = 1000;
     ctrl.data         = data;
