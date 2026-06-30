@@ -72,6 +72,10 @@ dependencies {
     implementation("androidx.activity:activity-ktx:1.13.0")
     implementation("androidx.activity:activity-compose:1.13.0")
 
+    // SQLite
+    implementation("androidx.sqlite:sqlite:2.4.0")
+    implementation("androidx.sqlite:sqlite-ktx:2.4.0")
+
     // Compose BOM
     implementation(platform("androidx.compose:compose-bom:2026.02.01"))
     implementation("androidx.compose.ui:ui")

@@ -10,6 +10,7 @@ import com.example.fold.AppContainer
 import com.example.fold.R
 import com.example.fold.data.model.FileItem
 import com.example.fold.data.provider.LocalFileProvider
+import com.example.fold.data.db.FileIndexer
 import com.example.fold.util.FoldLogger
 import com.example.fold.util.RootHelper
 import com.example.fold.util.ShizukuHelper
@@ -60,6 +61,14 @@ data class FileBrowserState(
     // 复制/移动剪贴板
     val clipboardFile: FileItem? = null,
     val clipboardMove: Boolean = false,  // true=移动, false=复制
+    // 搜索
+    val searchQuery: String = "",
+    val isSearchActive: Boolean = false,
+    val searchResults: List<FileItem> = emptyList(),
+    val searchInCurrentFolder: Boolean = false,
+    // 多选
+    val selectionMode: Boolean = false,
+    val selectedFiles: Set<String> = emptySet(),  // file paths
 )
 
 private const val TAG = "FoldVM"
@@ -69,6 +78,7 @@ class FileBrowserViewModel : ViewModel() {
     private val app: Application = AppContainer.appContext as Application
     private val localFileProvider: LocalFileProvider = AppContainer.localFileProvider
     private val prefs = app.getSharedPreferences("file_sort", Context.MODE_PRIVATE)
+    private val fileIndexer = FileIndexer(app)
 
     private val _state = MutableStateFlow(FileBrowserState())
     val state: StateFlow<FileBrowserState> = _state.asStateFlow()
@@ -76,6 +86,10 @@ class FileBrowserViewModel : ViewModel() {
     // 文件列表独立 StateFlow，避免 UI 状态变化触发 LazyColumn 重组
     private val _files = MutableStateFlow<List<FileItem>>(emptyList())
     val files: StateFlow<List<FileItem>> = _files.asStateFlow()
+
+    // 回收站开关
+    private val _trashEnabled = MutableStateFlow(prefs.getBoolean("trash_enabled", false))
+    val trashEnabled: StateFlow<Boolean> = _trashEnabled.asStateFlow()
 
     // 文件夹级排序覆盖: path -> SortMode
     private val folderSortOverrides = mutableMapOf<String, SortMode>()
@@ -135,7 +149,6 @@ class FileBrowserViewModel : ViewModel() {
 
     init {
         FoldLogger.i(TAG, "init: starting FileBrowserViewModel")
-        // 启动时同步桌面图标状态（防止异常中断导致不一致）
         switchLauncherAlias(_calculatorMode.value)
         val globalMode = SortMode.fromPref(prefs.getString("global_sort", null))
         val showHidden = prefs.getBoolean("show_hidden", false)
@@ -147,6 +160,15 @@ class FileBrowserViewModel : ViewModel() {
             shizukuGranted = ShizukuHelper.granted.value
         ) }
         navigateTo(localFileProvider.getRootPath())
+
+        // 后台构建文件索引（搜索用）
+        viewModelScope.launch {
+            val count = fileIndexer.count()
+            if (count == 0) {
+                FoldLogger.i(TAG, "File index empty, rebuilding...")
+                fileIndexer.rebuildIndex()
+            }
+        }
 
         viewModelScope.launch {
             val hasRoot = RootHelper.isAvailable()
@@ -214,7 +236,7 @@ class FileBrowserViewModel : ViewModel() {
                 } else if (isRestricted && !ShizukuHelper.granted.value) {
                     emptyList()
                 } else {
-                    localFileProvider.listFilesFast(path)
+                    localFileProvider.listFiles(path)
                 }
                 val t2 = System.nanoTime()
                 FoldLogger.d(TAG, "navigateTo: listFiles=${(t2 - t1) / 1_000_000}ms, count=${rawFiles.size}, isRestricted=$isRestricted")
@@ -245,20 +267,6 @@ class FileBrowserViewModel : ViewModel() {
                 }
                 val t6 = System.nanoTime()
                 FoldLogger.d(TAG, "navigateTo: success, path=$path, files=${sorted.size}, stateUpdate=${(t6 - t5) / 1_000_000}ms, total=${(t6 - t0) / 1_000_000}ms")
-
-                // 后台加载文件大小和修改时间（低速设备异步填充）
-                if (!isRestricted && sorted.isNotEmpty() && sorted.any { it.size == 0L && !it.isDirectory }) {
-                    val capturedPath = path
-                    val capturedShowHidden = _state.value.showHiddenFiles
-                    viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                        val full = localFileProvider.listFiles(capturedPath)
-                        if (_state.value.currentPath == capturedPath) {
-                            val result = if (!capturedShowHidden) full else full.filter { !it.name.startsWith(".") }
-                            _files.value = result
-                            FoldLogger.d(TAG, "navigateTo: metadata loaded, ${result.size} files")
-                        }
-                    }
-                }
             } catch (e: Exception) {
                 FoldLogger.e(TAG, "navigateTo: failed, path=$path", e)
                 _state.update { it.copy(isLoading = false, error = e.message) }
@@ -280,20 +288,35 @@ class FileBrowserViewModel : ViewModel() {
 
     fun deleteFile(file: FileItem) {
         FoldLogger.i(TAG, "deleteFile: name=${file.name}, path=${file.path}")
-        viewModelScope.launch {
-            val success = if (ShizukuHelper.needsShizuku(file.path) && ShizukuHelper.granted.value) {
-                ShizukuHelper.deleteRestricted(file.path).isSuccess
-            } else {
-                localFileProvider.deleteFile(file.path)
-            }
-            if (success) {
-                FoldLogger.i(TAG, "deleteFile: success, name=${file.name}")
-                localFileProvider.invalidateCache(java.io.File(file.path).parent ?: "")
-                val updated = _files.value.filter { it.path != file.path }
-                _files.value = updated
-                _state.update { s -> s.copy(files = updated) }
-            } else {
-                FoldLogger.w(TAG, "deleteFile: failed, name=${file.name}")
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val success = if (ShizukuHelper.needsShizuku(file.path) && ShizukuHelper.granted.value) {
+                    ShizukuHelper.deleteRestricted(file.path).isSuccess
+                } else {
+                    val f = File(file.path)
+                    if (f.exists()) {
+                        if (_trashEnabled.value) {
+                            moveToTrash(f)
+                        } else {
+                            f.deleteRecursively()
+                        }
+                        true
+                    } else {
+                        false
+                    }
+                }
+                if (success) {
+                    FoldLogger.i(TAG, "deleteFile: success, name=${file.name}")
+                    localFileProvider.invalidateCache(java.io.File(file.path).parent ?: "")
+                    val updated = _files.value.filter { it.path != file.path }
+                    _files.value = updated
+                    _state.update { s -> s.copy(files = updated) }
+                } else {
+                    FoldLogger.w(TAG, "deleteFile: failed, name=${file.name}")
+                    _state.update { it.copy(error = app.getString(R.string.delete_failed, file.name)) }
+                }
+            } catch (e: Exception) {
+                FoldLogger.e(TAG, "deleteFile: exception", e)
                 _state.update { it.copy(error = app.getString(R.string.delete_failed, file.name)) }
             }
         }
@@ -586,6 +609,240 @@ class FileBrowserViewModel : ViewModel() {
     fun copyServerUrl() {
         FoldLogger.d(TAG, "copyServerUrl: url=${_state.value.serverUrl}")
         _state.update { it.copy(copiedPath = _state.value.serverUrl) }
+    }
+
+    // ===== 搜索 =====
+
+    fun onSearchQueryChange(query: String) {
+        _state.update { it.copy(searchQuery = query) }
+        if (query.isEmpty()) {
+            _state.update { it.copy(isSearchActive = false, searchResults = emptyList()) }
+            _files.value = _state.value.files
+            return
+        }
+        _state.update { it.copy(isSearchActive = true) }
+        performSearch(query)
+    }
+
+    fun clearSearch() {
+        _state.update { it.copy(searchQuery = "", isSearchActive = false, searchResults = emptyList()) }
+        _files.value = _state.value.files
+    }
+
+    fun toggleSearchScope() {
+        val newValue = !_state.value.searchInCurrentFolder
+        _state.update { it.copy(searchInCurrentFolder = newValue) }
+        // 重新执行当前搜索
+        val query = _state.value.searchQuery
+        if (query.isNotEmpty()) {
+            performSearch(query)
+        }
+    }
+
+    private fun performSearch(query: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            // 如果索引为空，先构建（最多等 10 秒）
+            var attempts = 0
+            while (fileIndexer.count() == 0 && attempts < 20) {
+                if (attempts == 0) {
+                    FoldLogger.i(TAG, "Search: index empty, rebuilding...")
+                    fileIndexer.rebuildIndex()
+                }
+                kotlinx.coroutines.delay(500)
+                attempts++
+            }
+            val searchResults = if (_state.value.searchInCurrentFolder) {
+                fileIndexer.searchInPath(query, _state.value.currentPath)
+            } else {
+                fileIndexer.search(query)
+            }
+            val results = searchResults.map { entity ->
+                FileItem(
+                    name = entity.name,
+                    path = entity.path,
+                    isDirectory = entity.isDirectory,
+                    size = entity.size,
+                    lastModifiedTimestamp = entity.lastModified,
+                    extension = entity.extension
+                )
+            }
+            withContext(Dispatchers.Main) {
+                _state.update { it.copy(searchResults = results) }
+                _files.value = results
+            }
+        }
+    }
+
+    fun rebuildIndex() {
+        viewModelScope.launch(Dispatchers.IO) {
+            fileIndexer.rebuildIndex()
+        }
+    }
+
+    // ===== 多选 =====
+
+    fun toggleSelectionMode() {
+        val newMode = !_state.value.selectionMode
+        _state.update { it.copy(selectionMode = newMode, selectedFiles = emptySet()) }
+    }
+
+    fun toggleFileSelection(file: FileItem) {
+        val current = _state.value.selectedFiles.toMutableSet()
+        if (current.contains(file.path)) {
+            current.remove(file.path)
+        } else {
+            current.add(file.path)
+        }
+        _state.update { it.copy(selectedFiles = current) }
+        if (current.isEmpty() && _state.value.selectionMode) {
+            _state.update { it.copy(selectionMode = false) }
+        }
+    }
+
+    fun selectAll() {
+        val allPaths = _files.value.map { it.path }.toSet()
+        _state.update { it.copy(selectedFiles = allPaths) }
+    }
+
+    fun batchDelete() {
+        val selected = _state.value.selectedFiles
+        if (selected.isEmpty()) return
+        FoldLogger.i(TAG, "batchDelete: ${selected.size} files")
+        viewModelScope.launch(Dispatchers.IO) {
+            var successCount = 0
+            for (path in selected) {
+                try {
+                    moveToTrash(File(path))
+                    successCount++
+                } catch (e: Exception) {
+                    FoldLogger.e(TAG, "batchDelete: failed for $path", e)
+                }
+            }
+            withContext(Dispatchers.Main) {
+                _state.update { it.copy(selectionMode = false, selectedFiles = emptySet()) }
+                refresh()
+                if (successCount < selected.size) {
+                    _state.update { it.copy(error = "已删除 $successCount/${selected.size} 个文件") }
+                }
+            }
+        }
+    }
+
+    fun batchMove() {
+        val selected = _state.value.selectedFiles
+        if (selected.isEmpty()) return
+        val firstFile = _files.value.find { it.path in selected }
+        if (firstFile != null) {
+            _state.update { it.copy(clipboardFile = firstFile, clipboardMove = true) }
+        }
+    }
+
+    fun batchCopy() {
+        val selected = _state.value.selectedFiles
+        if (selected.isEmpty()) return
+        val firstFile = _files.value.find { it.path in selected }
+        if (firstFile != null) {
+            _state.update { it.copy(clipboardFile = firstFile, clipboardMove = false) }
+        }
+    }
+
+    // ===== 回收站 =====
+
+    fun getTrashDir(): File {
+        val dir = File(app.filesDir, "trash")
+        dir.mkdirs()
+        return dir
+    }
+
+    fun getTrashDirPath(): String = getTrashDir().absolutePath
+
+    fun getTrashOriginalPath(trashPath: String): String? {
+        val meta = loadTrashMeta()
+        return meta[trashPath]
+    }
+
+    fun toggleTrashEnabled() {
+        val newValue = !_trashEnabled.value
+        _trashEnabled.value = newValue
+        prefs.edit().putBoolean("trash_enabled", newValue).apply()
+    }
+
+    private fun getTrashMetaFile(): File = File(getTrashDir(), "metadata.json")
+
+    private fun loadTrashMeta(): MutableMap<String, String> {
+        try {
+            val metaFile = getTrashMetaFile()
+            if (metaFile.exists()) {
+                val json = metaFile.readText()
+                val map = mutableMapOf<String, String>()
+                json.lines().filter { line -> line.contains("=") }.forEach { line ->
+                    val parts = line.split("=", limit = 2)
+                    if (parts.size == 2) map[parts[0]] = parts[1]
+                }
+                return map
+            }
+        } catch (_: Exception) {}
+        return mutableMapOf()
+    }
+
+    private fun saveTrashMeta(meta: Map<String, String>) {
+        val metaFile = getTrashMetaFile()
+        metaFile.writeText(meta.entries.joinToString("\n") { "${it.key}=${it.value}" })
+    }
+
+    private fun moveToTrash(file: File) {
+        if (!file.exists()) return
+        val trashDir = getTrashDir()
+        val trashFile = File(trashDir, "${System.currentTimeMillis()}_${file.name}")
+        file.renameTo(trashFile)
+        val meta = loadTrashMeta()
+        meta[trashFile.absolutePath] = file.absolutePath
+        saveTrashMeta(meta)
+    }
+
+    fun restoreFromTrash(trashedName: String, originalPath: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val trashFile = File(getTrashDir(), trashedName)
+                val destFile = File(originalPath)
+                destFile.parentFile?.mkdirs()
+                trashFile.renameTo(destFile)
+                val meta = loadTrashMeta()
+                meta.remove(trashFile.absolutePath)
+                saveTrashMeta(meta)
+                withContext(Dispatchers.Main) {
+                    refresh()
+                }
+            } catch (e: Exception) {
+                FoldLogger.e(TAG, "restoreFromTrash: failed", e)
+            }
+        }
+    }
+
+    fun emptyTrash() {
+        viewModelScope.launch(Dispatchers.IO) {
+            getTrashDir().deleteRecursively()
+            getTrashDir().mkdirs()
+            saveTrashMeta(emptyMap())
+        }
+    }
+
+    fun cleanExpiredTrash() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val thirtyDaysMs = 30L * 24 * 60 * 60 * 1000
+            val now = System.currentTimeMillis()
+            val meta = loadTrashMeta()
+            val toRemove = mutableListOf<String>()
+            meta.forEach { (trashPath, _) ->
+                val file = File(trashPath)
+                if (!file.exists() || (now - file.lastModified() > thirtyDaysMs)) {
+                    file.delete()
+                    toRemove.add(trashPath)
+                }
+            }
+            toRemove.forEach { meta.remove(it) }
+            saveTrashMeta(meta)
+        }
     }
 
     override fun onCleared() {

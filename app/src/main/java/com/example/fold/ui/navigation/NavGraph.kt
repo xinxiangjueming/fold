@@ -15,6 +15,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.navArgument
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.fold.MainActivity
 import com.example.fold.ui.common.PredictiveBackScreen
 import com.example.fold.ui.eq.EqScreen
@@ -46,6 +47,7 @@ object Routes {
     const val AUDIO = "audio/{filePath}"
     const val AUDIO_BASE = "audio"
     const val EQ = "eq"
+    const val TRASH = "trash"
 
     fun reader(filePath: String): String {
         return "reader/${android.net.Uri.encode(filePath)}"
@@ -211,6 +213,9 @@ fun AppNavGraph(navController: NavHostController) {
                 },
                 onNavigateToHiddenApps = {
                     navigateWithCapture(Routes.HIDDEN_APPS)
+                },
+                onNavigateToTrash = {
+                    navigateWithCapture(Routes.TRASH)
                 }
             )
         }
@@ -227,6 +232,23 @@ fun AppNavGraph(navController: NavHostController) {
             PredictiveBackScreen(onBack = { navController.popBackStack() }) {
                 EqScreen(
                     onBack = { navController.popBackStack() }
+                )
+            }
+        }
+
+        composable(Routes.TRASH) {
+            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
+                val viewModel: com.example.fold.ui.filebrowser.FileBrowserViewModel = viewModel()
+                val trashEnabled by viewModel.trashEnabled.collectAsState()
+                com.example.fold.ui.trash.TrashScreen(
+                    onBack = { navController.popBackStack() },
+                    trashEnabled = trashEnabled,
+                    onToggleTrash = { viewModel.toggleTrashEnabled() },
+                    getTrashDir = { viewModel.getTrashDir() },
+                    getOriginalPath = { path -> viewModel.getTrashOriginalPath(path) },
+                    onRestore = { file, origPath -> viewModel.restoreFromTrash(file.name, origPath ?: "") },
+                    onDeletePermanent = { file -> file.delete() },
+                    onEmptyTrash = { viewModel.emptyTrash() }
                 )
             }
         }

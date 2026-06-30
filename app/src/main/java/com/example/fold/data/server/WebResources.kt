@@ -90,6 +90,9 @@ object WebResources {
         a { color: #1565C0; text-decoration: none; }
         a:hover { text-decoration: underline; }
         td:last-child { color: #999; font-size: 13px; text-align: right; width: 80px; }
+        .info { margin-top: 16px; background: white; padding: 16px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+        .info h3 { color: #333; font-size: 14px; margin-bottom: 8px; }
+        .info code { background: #f0f0f0; padding: 2px 6px; border-radius: 4px; font-size: 13px; word-break: break-all; }
         .upload { margin-top: 16px; background: white; padding: 16px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
         .upload form { display: flex; gap: 8px; }
         .upload input[type="file"] { flex: 1; }
@@ -103,6 +106,10 @@ object WebResources {
         <div class="path">$path</div>
     </div>
     <div class="content">
+        <div class="info">
+            <h3>WebDAV 地址</h3>
+            <code id="davUrl"></code>
+        </div>
         <table>
             $fileListHtml
         </table>
@@ -113,6 +120,9 @@ object WebResources {
             </form>
         </div>
     </div>
+    <script>
+        document.getElementById('davUrl').textContent = location.origin + '/dav';
+    </script>
 </body>
 </html>
         """.trimIndent()

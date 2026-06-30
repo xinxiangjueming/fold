@@ -212,4 +212,20 @@
     <string name="eq_status_inactive">均衡器已关闭</string>
     <string name="eq_current_preset">当前预设：%1$s</string>
 
+    <!-- 搜索 -->
+    <string name="search_files">搜索文件…</string>
+
+    <!-- 多选 -->
+    <string name="action_select">选择</string>
+    <string name="select_all">全选</string>
+    <string name="selected_count">已选择 %1$d 项</string>
+
+    <!-- 回收站 -->
+    <string name="trash_title">回收站</string>
+    <string name="trash_empty">回收站为空</string>
+    <string name="trash_count">共 %1$d 个文件</string>
+    <string name="trash_restore">恢复</string>
+    <string name="trash_delete_permanently">永久删除</string>
+    <string name="trash_empty_all">清空回收站</string>
+
 </resources>

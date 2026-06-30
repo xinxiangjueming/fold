@@ -181,4 +181,21 @@
     <string name="usb_rescan">Rescan</string>
     <string name="usb_disable_exclusive">Disable Exclusive</string>
     <string name="usb_enable_exclusive">Enable Exclusive</string>
+
+    <!-- Search -->
+    <string name="search_files">Search files…</string>
+
+    <!-- Multi-select -->
+    <string name="action_select">Select</string>
+    <string name="select_all">Select All</string>
+    <string name="selected_count">%1$d selected</string>
+
+    <!-- Trash -->
+    <string name="trash_title">Trash</string>
+    <string name="trash_empty">Trash is empty</string>
+    <string name="trash_count">%1$d files</string>
+    <string name="trash_restore">Restore</string>
+    <string name="trash_delete_permanently">Delete permanently</string>
+    <string name="trash_empty_all">Empty trash</string>
+
 </resources>

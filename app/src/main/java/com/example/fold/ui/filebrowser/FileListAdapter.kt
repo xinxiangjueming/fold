@@ -16,7 +16,10 @@ import java.io.File
 class FileListAdapter(
     private val onClick: (FileItem) -> Unit,
     private val onLongPress: (FileItem) -> Unit,
-    var isDark: Boolean
+    var isDark: Boolean,
+    var selectionMode: Boolean = false,
+    var selectedFiles: Set<String> = emptySet(),
+    var onToggleSelection: ((FileItem) -> Unit)? = null
 ) : ListAdapter<FileItem, FileListAdapter.VH>(Diff) {
 
     init { setHasStableIds(true) }
@@ -35,7 +38,8 @@ class FileListAdapter(
 
     override fun onBindViewHolder(holder: VH, position: Int) {
         val file = getItem(position)
-        holder.bind(file, isDark, onClick, onLongPress)
+        val isSelected = selectedFiles.contains(file.path)
+        holder.bind(file, isDark, isSelected, selectionMode, onClick, onLongPress, onToggleSelection)
     }
 
     override fun onViewRecycled(holder: VH) {
@@ -76,55 +80,44 @@ class FileListAdapter(
         private val arrow: ImageView = itemView.findViewById(R.id.arrow)
         private var currentPath: String? = null
 
-        fun bind(file: FileItem, isDark: Boolean, onClick: (FileItem) -> Unit, onLongPress: (FileItem) -> Unit) {
+        fun bind(file: FileItem, isDark: Boolean, isSelected: Boolean, selectionMode: Boolean,
+                 onClick: (FileItem) -> Unit, onLongPress: (FileItem) -> Unit,
+                 onToggleSelection: ((FileItem) -> Unit)?) {
             currentPath = file.path
 
             val hasThumb = hasThumbnail(file)
 
-            // Set icon background and visibility
             if (hasThumb) {
-                // Hide circular background and icon for thumbnails
                 iconBackground.visibility = View.GONE
                 icon.visibility = View.GONE
                 thumbnail.visibility = View.VISIBLE
-
-                // Set rounded background for thumbnail
                 val bgDrawable = GradientDrawable().apply {
                     shape = GradientDrawable.RECTANGLE
                     cornerRadius = 8f * itemView.context.resources.displayMetrics.density
                     setColor(if (isDark) 0xFF2A2A2A.toInt() else 0xFFF5F5F5.toInt())
                 }
                 thumbnail.background = bgDrawable
-
-                // Load thumbnail
                 ThumbnailLoader.loadThumbnail(thumbnail, File(file.path), isDark)
             } else {
-                // Show circular background and icon
                 iconBackground.visibility = View.VISIBLE
                 icon.visibility = View.VISIBLE
                 thumbnail.visibility = View.GONE
-
-                // Set circular background color
                 val bgColor = getIconBackgroundColor(file, isDark)
                 val bgDrawable = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
                     setColor(bgColor)
                 }
                 iconBackground.background = bgDrawable
-
-                // Set icon
                 ThumbnailLoader.cancelLoad(thumbnail)
                 icon.setImageResource(getIconRes(file))
             }
 
-            // Set title
             title.text = file.name
             val titleColor = if (isDark) 0xFFE0E0E0.toInt() else 0xFF1F1F1F.toInt()
             title.setTextColor(titleColor)
 
-            // Set subtitle
             if (!file.isDirectory) {
-                subtitle.text = "${formatFileSize(file.size)}  ·  ${formatTimestamp(file.lastModifiedTimestamp)}"
+                subtitle.text = "${formatFileSizeCompat(file.size)}  ·  ${formatTimestamp(file.lastModifiedTimestamp)}"
                 val subtitleColor = if (isDark) 0xFF9E9E9E.toInt() else 0xFF8A8A8A.toInt()
                 subtitle.setTextColor(subtitleColor)
                 subtitle.visibility = View.VISIBLE
@@ -132,12 +125,36 @@ class FileListAdapter(
                 subtitle.visibility = View.GONE
             }
 
-            // Show arrow for directories
-            arrow.visibility = if (file.isDirectory) View.VISIBLE else View.GONE
+            arrow.visibility = if (file.isDirectory && !selectionMode) View.VISIBLE else View.GONE
 
-            // Click handlers
-            itemView.setOnClickListener { onClick(file) }
-            itemView.setOnLongClickListener { onLongPress(file); true }
+            if (selectionMode) {
+                itemView.alpha = if (isSelected) 0.7f else 1.0f
+                val checkDrawable = if (isSelected) {
+                    android.graphics.drawable.ColorDrawable(if (isDark) 0x402196F3 else 0x202196F3)
+                } else {
+                    android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)
+                }
+                itemView.background = checkDrawable
+            } else {
+                itemView.alpha = 1.0f
+                itemView.background = android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)
+            }
+
+            itemView.setOnClickListener {
+                if (selectionMode) {
+                    onToggleSelection?.invoke(file)
+                } else {
+                    onClick(file)
+                }
+            }
+            itemView.setOnLongClickListener {
+                if (selectionMode) {
+                    onToggleSelection?.invoke(file)
+                } else {
+                    onLongPress(file)
+                }
+                true
+            }
         }
 
         fun recycle() {
@@ -146,6 +163,16 @@ class FileListAdapter(
         }
 
         companion object {
+            private fun formatFileSizeCompat(bytes: Long): String {
+                if (bytes < 1024) return "$bytes B"
+                val kb = bytes / 1024.0
+                if (kb < 1024) return "%.1f KB".format(kb)
+                val mb = kb / 1024.0
+                if (mb < 1024) return "%.1f MB".format(mb)
+                val gb = mb / 1024.0
+                return "%.1f GB".format(gb)
+            }
+
             fun hasThumbnail(file: FileItem): Boolean {
                 val ext = file.extension.lowercase()
                 return ext in setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "mp4", "mkv", "avi", "mov", "webm", "pdf", "apk")
