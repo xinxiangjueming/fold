@@ -1,6 +1,7 @@
 package com.example.fold.ui.player
 
 import android.content.Context
+import android.content.res.Configuration
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -27,6 +28,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -65,7 +67,7 @@ fun AudioPlayerScreen(
 
     // filePath 变化时重新初始化（切换歌曲）
     LaunchedEffect(filePath) {
-        android.util.Log.d("AudioPlayer", "init called, filePath=$filePath")
+        com.example.fold.util.FoldLogger.i("AudioPlayer", "=== Screen LaunchedEffect === filePath=$filePath, lastFilePath=${MusicPlayerHolder.lastFilePath}, mediaIdx=${MusicPlayerHolder.exoPlayer?.currentMediaItemIndex}, state.title=${state.title}, state.idx=${state.currentIndex}")
         vm.init(filePath, playlist)
     }
 
@@ -97,6 +99,148 @@ fun AudioPlayerScreen(
     val isExclusive by MusicPlayerHolder.isExclusiveMode
     var exclusiveLabel by remember { mutableStateOf("") }
 
+    // 检测横竖屏
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+    if (isLandscape) {
+        // ===== 横屏布局：左封面+控制，右歌词 =====
+        Row(
+            Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // 左侧：封面 + 控制
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                // 封面
+                Box(
+                    modifier = Modifier
+                        .size(160.dp)
+                        .clip(CircleShape)
+                        .background(surface),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val art = state.albumArt
+                    if (art != null) {
+                        val imageBitmap = remember(art) { art.asImageBitmap() }
+                        Image(bitmap = imageBitmap, contentDescription = null,
+                            modifier = Modifier.fillMaxSize())
+                    } else {
+                        Icon(Icons.Filled.MusicNote, contentDescription = null,
+                            modifier = Modifier.size(60.dp),
+                            tint = onSurfaceVar.copy(alpha = 0.5f))
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                // 曲名
+                Text(state.title, style = MaterialTheme.typography.titleSmall,
+                    color = onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (state.playlistSize > 1) {
+                    Text("${state.currentIndex + 1} / ${state.playlistSize}",
+                        style = MaterialTheme.typography.bodySmall, color = onSurfaceVar)
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                // 进度条
+                if (state.initialized) {
+                    IndependentProgressBar(
+                        exoPlayer = vm.exoPlayer,
+                        duration = state.duration,
+                        onSeek = { vm.seekTo(it) }
+                    )
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                // 播放控制
+                PlaybackControls(
+                    isPlaying = state.isPlaying,
+                    onPrev = { vm.prev() },
+                    onToggle = { vm.togglePlay() },
+                    onNext = { vm.next() },
+                    tint = onSurface
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                // 功能按钮
+                FeatureButtons(
+                    loopMode = state.loopMode,
+                    sleepActive = state.sleepRemaining != 0,
+                    onLoopChange = { vm.cycleLoopMode() },
+                    onSleepClick = { showSleepDialog = true },
+                    onEqualizerClick = handleEqualizerClick,
+                    onPlaylistClick = { showPlaylist = true },
+                    primaryColor = MaterialTheme.colorScheme.primary,
+                    variantColor = onSurfaceVar
+                )
+            }
+
+            // 右侧：歌词
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .padding(end = 16.dp, top = 8.dp, bottom = 8.dp)
+            ) {
+                // 歌词标题
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(stringResource(R.string.reader_chapters),
+                        style = MaterialTheme.typography.labelMedium, color = onSurfaceVar)
+                    if (state.lyrics.isNotEmpty()) {
+                        IconButton(onClick = { vm.toggleLyrics() }, modifier = Modifier.size(32.dp)) {
+                            Icon(
+                                if (state.showLyrics) Icons.Filled.MusicNote else Icons.Filled.Lyrics,
+                                contentDescription = null, modifier = Modifier.size(18.dp),
+                                tint = onSurfaceVar
+                            )
+                        }
+                    }
+                }
+
+                // 歌词列表
+                if (state.lyrics.isNotEmpty()) {
+                    LazyColumn(
+                        state = lyricsListState,
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        items(state.lyrics.size, key = { it }) { idx ->
+                            Text(
+                                text = state.lyrics[idx].second,
+                                fontSize = if (idx == state.currentLyricIndex) 16.sp else 13.sp,
+                                color = if (idx == state.currentLyricIndex) onSurface
+                                else onSurfaceVar.copy(alpha = 0.5f),
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                            )
+                        }
+                    }
+                } else {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(stringResource(R.string.reader_no_content),
+                            style = MaterialTheme.typography.bodyMedium, color = onSurfaceVar)
+                    }
+                }
+            }
+        }
+    } else {
+    // ===== 竖屏布局 =====
     Column(
         Modifier
             .fillMaxSize()
@@ -207,6 +351,7 @@ fun AudioPlayerScreen(
 
         Spacer(Modifier.weight(0.5f))
     }
+    } // end else (竖屏)
 
     // ===== 弹窗 =====
     if (showSleepDialog) {

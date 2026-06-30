@@ -10,6 +10,8 @@
 #include <unistd.h>
 #include <errno.h>
 #include <android/log.h>
+#include <cstdio>
+#include <ctime>
 
 #include <linux/usbdevice_fs.h>
 #include <sys/ioctl.h>
@@ -19,27 +21,58 @@
 #endif
 
 #define TAG "UsbAudioOutput"
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  TAG, __VA_ARGS__)
-#define LOGW(...) __android_log_print(ANDROID_LOG_WARN,  TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
-// ── Float → PCM conversion ───────────────────────────────────────────────
+static FILE *gLogFile = nullptr;
 
+static void openLogFile() {
+    if (gLogFile) return;
+    gLogFile = fopen("/storage/emulated/0/fold/fold.log", "a");
+    if (gLogFile) setbuf(gLogFile, nullptr);
+}
+
+static void logToFile(const char *level, const char *fmt, ...) {
+    openLogFile();
+    if (!gLogFile) return;
+    time_t now = time(nullptr);
+    struct tm *t = localtime(&now);
+    char timeBuf[32];
+    strftime(timeBuf, sizeof(timeBuf), "%m-%d %H:%M:%S", t);
+    fprintf(gLogFile, "%s %s/%s: ", timeBuf, level, TAG);
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(gLogFile, fmt, args);
+    va_end(args);
+    fprintf(gLogFile, "\n");
+    fflush(gLogFile);
+}
+
+#define LOGI(...) do { __android_log_print(ANDROID_LOG_INFO,  TAG, __VA_ARGS__); logToFile("I", __VA_ARGS__); } while(0)
+#define LOGW(...) do { __android_log_print(ANDROID_LOG_WARN,  TAG, __VA_ARGS__); logToFile("W", __VA_ARGS__); } while(0)
+#define LOGE(...) do { __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__); logToFile("E", __VA_ARGS__); } while(0)
+
+// ── Float → PCM conversion (bit-perfect, matching FFmpeg's libswresample) ──
+
+static inline float clampf(float v) { return v > 1.0f ? 1.0f : (v < -1.0f ? -1.0f : v); }
+
+// FFmpeg normalizes: int / 2^N (e.g., int16 / 32768.0)
+// Reconversion: float × 2^N gives exact round-trip for 16-bit and 24-bit because:
+//   - 2^N is exactly representable in float32 (power of 2)
+//   - float32 has 24-bit mantissa, covering int16 (16-bit) and int24 (24-bit) exactly
 static void convertFloatToInt16(const float *in, int16_t *out, int sampleCount) {
     for (int i = 0; i < sampleCount; i++) {
-        float s = in[i];
-        if (s > 1.0f)  s = 1.0f;
-        if (s < -1.0f) s = -1.0f;
-        out[i] = (int16_t)(s * 32767.0f);
+        float s = clampf(in[i]) * 32768.0f;
+        if (s > 32767.0f) s = 32767.0f;
+        if (s < -32768.0f) s = -32768.0f;
+        out[i] = (int16_t)s;
     }
 }
 
 static void convertFloatToInt24(const float *in, uint8_t *out, int sampleCount) {
     for (int i = 0; i < sampleCount; i++) {
-        float s = in[i];
-        if (s > 1.0f)  s = 1.0f;
-        if (s < -1.0f) s = -1.0f;
-        int32_t v = (int32_t)(s * 8388607.0f);
+        float s = clampf(in[i]) * 8388608.0f;
+        if (s > 8388607.0f) s = 8388607.0f;
+        if (s < -8388608.0f) s = -8388608.0f;
+        int32_t v = (int32_t)s;
         out[i * 3 + 0] = (uint8_t)(v & 0xFF);
         out[i * 3 + 1] = (uint8_t)((v >> 8) & 0xFF);
         out[i * 3 + 2] = (uint8_t)((v >> 16) & 0xFF);
@@ -48,10 +81,12 @@ static void convertFloatToInt24(const float *in, uint8_t *out, int sampleCount) 
 
 static void convertFloatToInt32(const float *in, int32_t *out, int sampleCount) {
     for (int i = 0; i < sampleCount; i++) {
-        double s = (double)in[i];
-        if (s > 1.0)  s = 1.0;
-        if (s < -1.0) s = -1.0;
-        out[i] = (int32_t)(s * 2147483647.0);
+        // Use double: float32 can't represent 2147483648.0 exactly (needs 31 bits,
+        // float32 has 24-bit mantissa). Double has 53-bit mantissa — sufficient.
+        double s = (double)clampf(in[i]) * 2147483648.0;
+        if (s > 2147483647.0) s = 2147483647.0;
+        if (s < -2147483648.0) s = -2147483648.0;
+        out[i] = (int32_t)s;
     }
 }
 
@@ -159,16 +194,16 @@ static int readFeedback(UsbAudioContext *ctx) {
 }
 
 static int allocFeedbackUrb(UsbAudioContext *ctx) {
-    if (ctx->endpointFeedback == 0) return 0;
+    if (ctx->endpointFeedback == 0) return 1; // no feedback endpoint, not an error
     size_t sz = sizeof(struct usbdevfs_urb) + sizeof(struct usbdevfs_iso_packet_desc);
     ctx->feedbackUrb = calloc(1, sz);
     if (!ctx->feedbackUrb) {
         LOGE("allocFeedbackUrb: calloc failed");
-        return -1;
+        return 0;
     }
     ctx->feedbackInFlight = false;
     LOGI("allocFeedbackUrb: allocated");
-    return 0;
+    return 1;
 }
 
 static int submitFeedbackUrb(UsbAudioContext *ctx) {
@@ -205,7 +240,13 @@ static void handleFeedbackCompletion(UsbAudioContext *ctx, struct usbdevfs_urb *
             raw |= ((uint32_t)buf[3] << 24);
         }
         double fpmf = (double)raw / 65536.0;
-        ctx->calibratedFpmf = fpmf;
+        // Sanity check: feedback should be within ±1% of nominal
+        double nominal = ctx->sampleRate / 8000.0;
+        if (fpmf > nominal * 0.99 && fpmf < nominal * 1.01) {
+            ctx->calibratedFpmf = fpmf;
+        } else {
+            LOGW("Feedback sanity check failed: fpmf=%.4f nominal=%.4f, ignoring", fpmf, nominal);
+        }
     }
     ctx->feedbackInFlight = false;
     submitFeedbackUrb(ctx);
@@ -241,7 +282,12 @@ static int submitRingUrb(UsbAudioContext *ctx, const int *pktSizes, int numPacke
 
     int ret = ioctl(ctx->fd, USBDEVFS_SUBMITURB, urb);
     if (ret < 0) {
-        LOGE("submitRingUrb[%d]: SUBMITURB failed: %s", idx, strerror(errno));
+        int err = errno;
+        LOGE("submitRingUrb[%d]: SUBMITURB failed: %s (errno=%d, fd=%d, ep=0x%02X)",
+             idx, strerror(err), err, ctx->fd, ctx->endpointOut);
+        if (err == ENOENT || err == EBADF) {
+            LOGE("submitRingUrb: USB fd invalid — device may have been reset by kernel driver");
+        }
         return -1;
     }
 
@@ -532,49 +578,49 @@ Java_com_example_fold_audio_UsbAudioStream_nativeCreate(
     LOGI("nativeCreate: fd=%d ifId=%d epOut=0x%02X epFb=0x%02X rate=%d ch=%d bits=%d maxPkt=%d",
          fd, ifId, epOut, epFb, rate, ch, bits, maxPkt);
 
-    // Detach kernel driver from the audio streaming interface
-    struct usbdevfs_ioctl cmd;
-    memset(&cmd, 0, sizeof(cmd));
-    cmd.ifno = ifId;
-    cmd.ioctl_code = USBDEVFS_DISCONNECT;
-    int ret = ioctl(fd, USBDEVFS_IOCTL, &cmd);
-    if (ret < 0) {
-        LOGW("nativeCreate: USBDEVFS_DISCONNECT ifno=%d: %s (may not be attached)", ifId, strerror(errno));
-    } else {
-        LOGI("nativeCreate: detached kernel driver from interface %d", ifId);
+    // Detach kernel driver ONLY from the streaming interface.
+    // Do NOT touch interface 0 (AudioControl) — the kernel's clock management
+    // on that interface is needed by many DACs for proper isochronous scheduling.
+    // Forcing a detach+claim on AudioControl causes ENODEV after a few seconds.
+    {
+        struct usbdevfs_ioctl cmd;
+        memset(&cmd, 0, sizeof(cmd));
+        cmd.ifno = ifId;
+        cmd.ioctl_code = USBDEVFS_DISCONNECT;
+        int ret = ioctl(fd, USBDEVFS_IOCTL, &cmd);
+        if (ret >= 0) {
+            LOGI("nativeCreate: detached kernel driver from interface %d", ifId);
+        } else {
+            LOGW("nativeCreate: USBDEVFS_DISCONNECT ifno=%d: %s (errno=%d)", ifId, strerror(errno), errno);
+        }
     }
 
     // Claim the audio streaming interface
     unsigned int ifnum = (unsigned int)ifId;
-    ret = ioctl(fd, USBDEVFS_CLAIMINTERFACE, &ifnum);
+    int ret = ioctl(fd, USBDEVFS_CLAIMINTERFACE, &ifnum);
     if (ret < 0) {
-        LOGE("nativeCreate: USBDEVFS_CLAIMINTERFACE ifno=%d failed: %s", ifId, strerror(errno));
+        LOGE("nativeCreate: USBDEVFS_CLAIMINTERFACE ifno=%d failed: %s (errno=%d)", ifId, strerror(errno), errno);
         delete ctx;
         return 0;
     }
-
-    // Also claim interface 0 (AudioControl) for SET_CUR/GET_CUR clock control
-    if (ifId != 0) {
-        unsigned int ifnum0 = 0;
-        ioctl(fd, USBDEVFS_CLAIMINTERFACE, &ifnum0); // best effort
-    }
+    LOGI("nativeCreate: claimed interface %d", ifId);
 
     // Allocate ring buffers and feedback URB at creation time (like decent-player)
     allocRing(ctx);
     if (!ctx->ringAllocated) {
-        LOGE("nativeCreate: allocRing failed");
+        LOGE("nativeCreate: allocRing failed - out of memory");
         delete ctx;
         return 0;
     }
 
-    if (!allocFeedbackUrb(ctx)) {
+    if (allocFeedbackUrb(ctx) == 0) {
         LOGE("nativeCreate: allocFeedbackUrb failed");
         freeRing(ctx);
         delete ctx;
         return 0;
     }
 
-    LOGI("nativeCreate: success, ring allocated, feedback URB allocated");
+    LOGI("nativeCreate: success, ring=%d slots, feedback=%s", USB_AUDIO_NUM_URBS, ctx->feedbackUrb ? "allocated" : "skipped");
     return reinterpret_cast<jlong>(ctx);
 }
 

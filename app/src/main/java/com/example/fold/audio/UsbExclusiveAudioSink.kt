@@ -135,18 +135,31 @@ class UsbExclusiveAudioSink(
         if (usbStarted) {
             isPlaying = true
         } else {
+            // Proper startup sequence matching decent-player / UAPP:
+            // 1. Drain any stale URBs from previous session
+            // 2. Set alt=0 (deactivate endpoint)
+            // 3. Set sample rate via clock control
+            // 4. Set alt=N (activate endpoint)
+            // 5. Start stream
+            stream.drain()
             stream.stop()
-            // Activate the alt setting to enable the ISO endpoint
             val info = deviceInfo
             if (info != null) {
+                stream.setAltSetting(0)
+                Log.i(TAG, "setAltSetting(0): deactivated endpoint")
+                Thread.sleep(50) // DAC needs time to settle after alt change
+
+                val rateOk = stream.setSampleRate(sampleRate, usbClockSourceId)
+                Log.i(TAG, "setSampleRate($sampleRate, csId=$usbClockSourceId): $rateOk")
+                Thread.sleep(10) // Let clock lock before activating endpoint
+
                 val altOk = stream.setAltSetting(info.bestAltSetting)
                 Log.i(TAG, "setAltSetting(${info.bestAltSetting}): $altOk")
                 if (!altOk) {
                     Log.e(TAG, "setAltSetting failed, cannot start playback")
                     return
                 }
-                val rateOk = stream.setSampleRate(sampleRate, usbClockSourceId)
-                Log.i(TAG, "setSampleRate($sampleRate, csId=$usbClockSourceId): $rateOk")
+                Thread.sleep(20) // DAC needs time after alt activation before URBs
             }
             isPlaying = true
             val started = stream.start()
@@ -206,17 +219,22 @@ class UsbExclusiveAudioSink(
 
         if (!usbStarted) {
             Log.i(TAG, "Auto-starting USB on first handleBuffer")
+            stream.drain()
             stream.stop()
-            // Activate the alt setting to enable the ISO endpoint
             val info = deviceInfo
             if (info != null) {
+                stream.setAltSetting(0)
+                Log.i(TAG, "setAltSetting(0): deactivated endpoint (auto-start)")
+                Thread.sleep(50)
+                stream.setSampleRate(sampleRate, usbClockSourceId)
+                Thread.sleep(10)
                 val altOk = stream.setAltSetting(info.bestAltSetting)
-                Log.i(TAG, "setAltSetting(${info.bestAltSetting}): $altOk")
+                Log.i(TAG, "setAltSetting(${info.bestAltSetting}): $altOk (auto-start)")
                 if (!altOk) {
                     Log.e(TAG, "setAltSetting failed in auto-start")
                     return false
                 }
-                stream.setSampleRate(sampleRate, usbClockSourceId)
+                Thread.sleep(20)
             }
             val started = stream.start()
             if (!started) {

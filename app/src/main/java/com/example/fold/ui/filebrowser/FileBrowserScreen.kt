@@ -49,6 +49,7 @@ import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import top.yukonga.miuix.kmp.basic.Slider as MiuixSlider
 
 private const val TAG = "FoldUI"
 
@@ -107,7 +108,7 @@ fun FileBrowserScreen(
     var searchActive by remember { mutableStateOf(false) }
     var searchText by remember { mutableStateOf("") }
 
-    androidx.activity.compose.PredictiveBackHandler(enabled = state.currentPath != getDisplayRoot(state) || searchActive) { backEvent ->
+    androidx.activity.compose.PredictiveBackHandler(enabled = state.currentPath != getDisplayRoot(state) || searchActive || state.selectionMode) { backEvent ->
         try {
             backScreenshot = try { view.drawToBitmap() } catch (e: Exception) { null }
             backEvent.collect { event ->
@@ -117,7 +118,9 @@ fun FileBrowserScreen(
             isBackGestureActive = false
             backProgress = 0f
             backScreenshot = null
-            if (searchActive) {
+            if (state.selectionMode) {
+                viewModel.toggleSelectionMode()
+            } else if (searchActive) {
                 searchActive = false
                 searchText = ""
                 viewModel.clearSearch()
@@ -243,13 +246,16 @@ fun FileBrowserScreen(
                             IconButton(onClick = { viewModel.batchMove() }) {
                                 Icon(Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = stringResource(R.string.action_move))
                             }
+                            IconButton(onClick = { viewModel.prepareBatchCompress() }) {
+                                Icon(Icons.Filled.Archive, contentDescription = stringResource(R.string.action_compress))
+                            }
                         } else {
                             if (!searchActive) {
                                 IconButton(onClick = { searchActive = true }) {
                                     Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.search_files))
                                 }
                             }
-                            state.clipboardFile?.let { clip ->
+                            if (state.clipboardFiles.isNotEmpty()) {
                                 val label = if (state.clipboardMove)
                                     stringResource(R.string.action_move_here)
                                 else
@@ -257,7 +263,7 @@ fun FileBrowserScreen(
                                 TextButton(onClick = { viewModel.pasteFile() }) {
                                     Icon(Icons.Filled.ContentPaste, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.width(4.dp))
-                                    Text(label, style = MaterialTheme.typography.labelMedium)
+                                    Text("$label (${state.clipboardFiles.size})", style = MaterialTheme.typography.labelMedium)
                                 }
                                 IconButton(onClick = { viewModel.clearClipboard() }) {
                                     Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -473,6 +479,11 @@ fun FileBrowserScreen(
                     LaunchedEffect(isDark) {
                         adapter.updateTheme(isDark)
                     }
+                    LaunchedEffect(state.selectionMode, state.selectedFiles) {
+                        adapter.selectionMode = state.selectionMode
+                        adapter.selectedFiles = state.selectedFiles
+                        adapter.notifyDataSetChanged()
+                    }
                     // 路径变化时恢复滚动位置
                     var lastPath by remember { mutableStateOf(state.currentPath) }
                     LaunchedEffect(state.currentPath) {
@@ -609,6 +620,77 @@ fun FileBrowserScreen(
                 )
             }
 
+            // 批量压缩格式选择弹窗
+            if (state.showBatchCompressDialog) {
+                AlertDialog(
+                    onDismissRequest = { viewModel.dismissBatchCompressDialog() },
+                    title = { Text(stringResource(R.string.compress_format_title), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) },
+                    text = {
+                        Column {
+                            DropdownMenuItem(text = { Text(stringResource(R.string.action_compress_zip)) }, onClick = { viewModel.executeBatchCompress("zip") })
+                            DropdownMenuItem(text = { Text(stringResource(R.string.action_compress_targz)) }, onClick = { viewModel.executeBatchCompress("targz") })
+                            DropdownMenuItem(text = { Text(stringResource(R.string.action_compress_7z)) }, onClick = { viewModel.executeBatchCompress("7z") })
+                        }
+                    },
+                    confirmButton = {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                            TextButton(onClick = { viewModel.dismissBatchCompressDialog() }) { Text(stringResource(R.string.action_cancel)) }
+                        }
+                    },
+                    shape = RoundedCornerShape(16.dp)
+                )
+            }
+
+            // 压缩进度弹窗
+            if (state.compressProgress >= 0f) {
+                AlertDialog(
+                    onDismissRequest = { viewModel.cancelCompress() },
+                    title = {
+                        Text(
+                            stringResource(R.string.action_compress),
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    },
+                    text = {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Text(
+                                state.compressFileName,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            MiuixSlider(
+                                value = state.compressProgress,
+                                onValueChange = {},
+                                valueRange = 0f..1f,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Text(
+                                "${(state.compressProgress * 100).toInt()}%",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                            TextButton(onClick = { viewModel.cancelCompress() }) {
+                                Text(stringResource(R.string.action_cancel))
+                            }
+                        }
+                    },
+                    dismissButton = {},
+                    shape = RoundedCornerShape(16.dp)
+                )
+            }
+
             // 长按操作菜单
             if (menuTargetFile != null) {
                 val file = menuTargetFile!!
@@ -698,8 +780,8 @@ private fun RenameDialog(currentName: String, onConfirm: (String) -> Unit, onDis
         text = { OutlinedTextField(value = newName, onValueChange = { newName = it }, singleLine = true, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) },
         confirmButton = {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                TextButton(onClick = { if (newName.isNotBlank()) onConfirm(newName) }) { Text(stringResource(R.string.action_save)) }
                 TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+                TextButton(onClick = { if (newName.isNotBlank()) onConfirm(newName) }) { Text(stringResource(R.string.action_save)) }
             }
         },
         shape = RoundedCornerShape(16.dp)
@@ -831,8 +913,8 @@ private fun SortDialog(
         },
         confirmButton = {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                TextButton(onClick = { onFolderOnlyChange(localFolderOnly); onConfirm(selectedMode, localFolderOnly) }) { Text(stringResource(R.string.action_save)) }
                 TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+                TextButton(onClick = { onFolderOnlyChange(localFolderOnly); onConfirm(selectedMode, localFolderOnly) }) { Text(stringResource(R.string.action_save)) }
             }
         },
         shape = RoundedCornerShape(16.dp)

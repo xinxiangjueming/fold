@@ -59,7 +59,7 @@ data class FileBrowserState(
     val isRestrictedPath: Boolean = false,
     val showHiddenFiles: Boolean = false,
     // 复制/移动剪贴板
-    val clipboardFile: FileItem? = null,
+    val clipboardFiles: List<FileItem> = emptyList(),
     val clipboardMove: Boolean = false,  // true=移动, false=复制
     // 搜索
     val searchQuery: String = "",
@@ -69,6 +69,10 @@ data class FileBrowserState(
     // 多选
     val selectionMode: Boolean = false,
     val selectedFiles: Set<String> = emptySet(),  // file paths
+    // 压缩进度
+    val compressProgress: Float = -1f,  // -1=隐藏, 0..1=进度
+    val compressFileName: String = "",
+    val showBatchCompressDialog: Boolean = false,
 )
 
 private const val TAG = "FoldVM"
@@ -409,68 +413,105 @@ class FileBrowserViewModel : ViewModel() {
 
     fun copyFile(file: FileItem) {
         FoldLogger.d(TAG, "copyFile: ${file.name}")
-        _state.update { it.copy(clipboardFile = file, clipboardMove = false) }
+        _state.update { it.copy(clipboardFiles = listOf(file), clipboardMove = false) }
     }
 
     fun moveFile(file: FileItem) {
         FoldLogger.d(TAG, "moveFile: ${file.name}")
-        _state.update { it.copy(clipboardFile = file, clipboardMove = true) }
+        _state.update { it.copy(clipboardFiles = listOf(file), clipboardMove = true) }
     }
 
     fun pasteFile() {
-        val clip = _state.value.clipboardFile ?: return
+        val clips = _state.value.clipboardFiles
+        if (clips.isEmpty()) return
         val isMove = _state.value.clipboardMove
         val destDir = File(_state.value.currentPath)
-        FoldLogger.i(TAG, "pasteFile: ${clip.name} → ${destDir.absolutePath}, move=$isMove")
+        FoldLogger.i(TAG, "pasteFile: ${clips.size} files → ${destDir.absolutePath}, move=$isMove")
         viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val src = File(clip.path)
-                val dest = File(destDir, clip.name)
-                if (src.absolutePath == dest.absolutePath) {
-                    _state.update { it.copy(clipboardFile = null, clipboardMove = false) }
-                    return@launch
+            var successCount = 0
+            for (clip in clips) {
+                try {
+                    val src = File(clip.path)
+                    val dest = File(destDir, clip.name)
+                    if (src.absolutePath == dest.absolutePath) continue
+                    if (isMove) {
+                        src.renameTo(dest)
+                    } else {
+                        src.copyTo(dest, overwrite = false)
+                    }
+                    successCount++
+                } catch (e: Exception) {
+                    FoldLogger.e(TAG, "pasteFile: failed for ${clip.name}", e)
                 }
-                if (isMove) {
-                    src.renameTo(dest)
-                } else {
-                    src.copyTo(dest, overwrite = false)
-                }
-                FoldLogger.i(TAG, "pasteFile: success")
-                withContext(Dispatchers.Main) { refresh() }
-            } catch (e: Exception) {
-                FoldLogger.e(TAG, "pasteFile: failed", e)
-                _state.update { it.copy(error = "操作失败: ${e.message}") }
             }
-            _state.update { it.copy(clipboardFile = null, clipboardMove = false) }
+            FoldLogger.i(TAG, "pasteFile: done $successCount/${clips.size}")
+            withContext(Dispatchers.Main) { refresh() }
+            _state.update { it.copy(clipboardFiles = emptyList(), clipboardMove = false) }
+            if (successCount < clips.size) {
+                _state.update { it.copy(error = "已完成 $successCount/${clips.size} 个文件") }
+            }
         }
     }
 
     fun clearClipboard() {
-        _state.update { it.copy(clipboardFile = null, clipboardMove = false) }
+        _state.update { it.copy(clipboardFiles = emptyList(), clipboardMove = false) }
     }
+
+    private var compressJob: kotlinx.coroutines.Job? = null
+    private var compressOutputPath: String? = null
+    @Volatile private var compressCancelled = false
 
     fun compressArchive(file: FileItem, format: String) {
         FoldLogger.i(TAG, "compressArchive: ${file.name}, format=$format")
-        viewModelScope.launch {
-            val ext = when (format) {
-                "targz" -> "tar.gz"
-                "7z" -> "7z"
-                else -> "zip"
+        val ext = when (format) {
+            "targz" -> "tar.gz"
+            "7z" -> "7z"
+            else -> "zip"
+        }
+        val outputPath = file.path + ".$ext"
+        compressOutputPath = outputPath
+        compressCancelled = false
+        compressJob = viewModelScope.launch {
+            FoldLogger.i(TAG, "compressArchive: setting progress=0")
+            _state.update { it.copy(compressProgress = 0f, compressFileName = file.name) }
+            val onProgress: (String, Int, Int) -> Unit = { name, current, total ->
+                if (!compressCancelled) {
+                    val progress = if (total > 0) current.toFloat() / total else 0f
+                    FoldLogger.i(TAG, "compressArchive: onProgress $current/$total $name progress=$progress")
+                    _state.update { it.copy(compressProgress = progress, compressFileName = name) }
+                }
             }
-            val outputPath = file.path + ".$ext"
-            val result = when (format) {
-                "targz" -> com.example.fold.data.archive.ArchiveHelper.compressTarGz(file.path, outputPath)
-                "7z" -> com.example.fold.data.archive.ArchiveHelper.compress7z(file.path, outputPath)
-                else -> com.example.fold.data.archive.ArchiveHelper.compressZip(file.path, outputPath)
-            }
-            if (result.isSuccess) {
-                FoldLogger.i(TAG, "compressArchive: success -> $outputPath")
-                refresh()
-            } else {
-                FoldLogger.e(TAG, "compressArchive: failed", result.exceptionOrNull())
-                _state.update { it.copy(error = "压缩失败: ${result.exceptionOrNull()?.message}") }
+            try {
+                FoldLogger.i(TAG, "compressArchive: starting compress, format=$format")
+                val result = when (format) {
+                    "targz" -> com.example.fold.data.archive.ArchiveHelper.compressTarGz(file.path, outputPath, onProgress)
+                    "7z" -> com.example.fold.data.archive.ArchiveHelper.compress7z(file.path, outputPath, onProgress)
+                    else -> com.example.fold.data.archive.ArchiveHelper.compressZip(file.path, outputPath, onProgress)
+                }
+                FoldLogger.i(TAG, "compressArchive: compress done, result=${result.isSuccess}")
+                if (result.isSuccess) {
+                    FoldLogger.i(TAG, "compressArchive: success -> $outputPath")
+                    refresh()
+                } else if (result.exceptionOrNull() !is kotlinx.coroutines.CancellationException) {
+                    FoldLogger.e(TAG, "compressArchive: failed", result.exceptionOrNull())
+                    _state.update { it.copy(error = "压缩失败: ${result.exceptionOrNull()?.message}") }
+                }
+            } finally {
+                compressJob = null
+                compressOutputPath = null
+                _state.update { it.copy(compressProgress = -1f, compressFileName = "") }
             }
         }
+    }
+
+    fun cancelCompress() {
+        FoldLogger.i(TAG, "cancelCompress")
+        compressCancelled = true
+        compressJob?.cancel()
+        compressJob = null
+        compressOutputPath?.let { java.io.File(it).delete() }
+        compressOutputPath = null
+        _state.update { it.copy(compressProgress = -1f, compressFileName = "") }
     }
 
     fun refresh() {
@@ -731,19 +772,80 @@ class FileBrowserViewModel : ViewModel() {
     fun batchMove() {
         val selected = _state.value.selectedFiles
         if (selected.isEmpty()) return
-        val firstFile = _files.value.find { it.path in selected }
-        if (firstFile != null) {
-            _state.update { it.copy(clipboardFile = firstFile, clipboardMove = true) }
+        val files = _files.value.filter { it.path in selected }
+        if (files.isNotEmpty()) {
+            _state.update { it.copy(clipboardFiles = files, clipboardMove = true, selectionMode = false, selectedFiles = emptySet()) }
         }
     }
 
     fun batchCopy() {
         val selected = _state.value.selectedFiles
         if (selected.isEmpty()) return
-        val firstFile = _files.value.find { it.path in selected }
-        if (firstFile != null) {
-            _state.update { it.copy(clipboardFile = firstFile, clipboardMove = false) }
+        val files = _files.value.filter { it.path in selected }
+        if (files.isNotEmpty()) {
+            _state.update { it.copy(clipboardFiles = files, clipboardMove = false, selectionMode = false, selectedFiles = emptySet()) }
         }
+    }
+
+    private var batchCompressTargetDir: File? = null
+    private var batchCompressFiles: List<File> = emptyList()
+
+    fun prepareBatchCompress() {
+        val selected = _state.value.selectedFiles
+        if (selected.isEmpty()) return
+        val files = _files.value.filter { it.path in selected }
+        if (files.isEmpty()) return
+        batchCompressFiles = files.map { File(it.path) }
+        batchCompressTargetDir = File(_state.value.currentPath)
+        _state.update { it.copy(showBatchCompressDialog = true, selectionMode = false, selectedFiles = emptySet()) }
+    }
+
+    fun executeBatchCompress(format: String) {
+        val files = batchCompressFiles
+        val baseDir = batchCompressTargetDir ?: return
+        if (files.isEmpty()) return
+        _state.update { it.copy(showBatchCompressDialog = false) }
+        val ext = when (format) {
+            "targz" -> "tar.gz"
+            "7z" -> "7z"
+            else -> "zip"
+        }
+        val dirName = baseDir.name.ifEmpty { "archive" }
+        val outputPath = File(baseDir, "$dirName.$ext").absolutePath
+        compressCancelled = false
+        compressOutputPath = outputPath
+        compressJob = viewModelScope.launch {
+            FoldLogger.i(TAG, "batchCompress: ${files.size} files, format=$format")
+            _state.update { it.copy(compressProgress = 0f, compressFileName = "${files.size} 个文件") }
+            val onProgress: (String, Int, Int) -> Unit = { name, current, total ->
+                if (!compressCancelled) {
+                    val progress = if (total > 0) current.toFloat() / total else 0f
+                    _state.update { it.copy(compressProgress = progress, compressFileName = name) }
+                }
+            }
+            try {
+                val result = com.example.fold.data.archive.ArchiveHelper.compressFiles(files, baseDir, outputPath, format, onProgress)
+                if (result.isSuccess) {
+                    FoldLogger.i(TAG, "batchCompress: success -> $outputPath")
+                    refresh()
+                } else if (result.exceptionOrNull() !is kotlinx.coroutines.CancellationException) {
+                    FoldLogger.e(TAG, "batchCompress: failed", result.exceptionOrNull())
+                    _state.update { it.copy(error = "压缩失败: ${result.exceptionOrNull()?.message}") }
+                }
+            } finally {
+                compressJob = null
+                compressOutputPath = null
+                _state.update { it.copy(compressProgress = -1f, compressFileName = "") }
+            }
+        }
+        batchCompressFiles = emptyList()
+        batchCompressTargetDir = null
+    }
+
+    fun dismissBatchCompressDialog() {
+        _state.update { it.copy(showBatchCompressDialog = false) }
+        batchCompressFiles = emptyList()
+        batchCompressTargetDir = null
     }
 
     // ===== 回收站 =====

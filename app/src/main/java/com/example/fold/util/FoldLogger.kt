@@ -19,20 +19,21 @@ object FoldLogger {
     private var writeFailCount = 0
 
     fun init(context: Context) {
-        // 优先 app 内部目录，不在用户目录创建文件夹
+        // 优先外部存储主目录，方便导出日志
         val candidates = mutableListOf<File>()
-        candidates.add(File(context.filesDir, "fold_reader.log"))
+        candidates.add(File(Environment.getExternalStorageDirectory(), "fold/fold.log"))
         try {
             val ext = context.getExternalFilesDir(null)
             if (ext != null) candidates.add(File(ext, "fold_reader.log"))
         } catch (_: Exception) {}
+        candidates.add(File(context.filesDir, "fold_reader.log"))
 
         for (file in candidates) {
             try {
                 val dir = file.parentFile
                 if (dir != null && !dir.exists()) dir.mkdirs()
                 if (!file.exists()) {
-                    file.writeText("========== Fold Reader Log ${dateFormat.format(Date())} ==========\n")
+                    file.writeText("========== Fold Log ${dateFormat.format(Date())} ==========\n")
                 }
                 bufferedWriter = BufferedWriter(FileWriter(file, true), 8192)
                 logFile = file

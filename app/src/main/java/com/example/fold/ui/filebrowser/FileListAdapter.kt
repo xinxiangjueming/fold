@@ -128,13 +128,17 @@ class FileListAdapter(
             arrow.visibility = if (file.isDirectory && !selectionMode) View.VISIBLE else View.GONE
 
             if (selectionMode) {
-                itemView.alpha = if (isSelected) 0.7f else 1.0f
-                val checkDrawable = if (isSelected) {
-                    android.graphics.drawable.ColorDrawable(if (isDark) 0x402196F3 else 0x202196F3)
+                itemView.alpha = if (isSelected) 0.85f else 1.0f
+                if (isSelected) {
+                    val radius = 16f * itemView.context.resources.displayMetrics.density
+                    itemView.background = GradientDrawable().apply {
+                        shape = GradientDrawable.RECTANGLE
+                        cornerRadius = radius
+                        setColor(if (isDark) 0x402196F3.toInt() else 0x202196F3.toInt())
+                    }
                 } else {
-                    android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)
+                    itemView.background = android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)
                 }
-                itemView.background = checkDrawable
             } else {
                 itemView.alpha = 1.0f
                 itemView.background = android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)

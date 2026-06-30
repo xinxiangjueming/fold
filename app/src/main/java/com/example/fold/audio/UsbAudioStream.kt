@@ -59,6 +59,8 @@ class UsbAudioStream private constructor(val nativeHandle: Long) {
         private external fun nativeIsRunning(handle: Long): Boolean
 
         fun create(info: UsbAudioDeviceInfo, rate: Int, ch: Int, bits: Int): UsbAudioStream? {
+            android.util.Log.i(TAG, "create: fd=${info.fd}, ifId=${info.interfaceId}, epOut=0x${info.endpointOut.toString(16)}, " +
+                "epFb=0x${info.endpointFeedback.toString(16)}, rate=$rate, ch=$ch, bits=$bits, maxPkt=${info.maxPacketSize}")
             val h = nativeCreate(
                 info.fd,
                 info.interfaceId,
@@ -69,6 +71,11 @@ class UsbAudioStream private constructor(val nativeHandle: Long) {
                 bits,
                 info.maxPacketSize,
             )
+            if (h == 0L) {
+                android.util.Log.e(TAG, "create: nativeCreate returned 0 - check native logs for details")
+            } else {
+                android.util.Log.i(TAG, "create: success, handle=$h")
+            }
             return if (h != 0L) UsbAudioStream(h) else null
         }
     }

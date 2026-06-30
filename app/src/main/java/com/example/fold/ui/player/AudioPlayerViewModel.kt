@@ -45,6 +45,10 @@ data class MusicUiState(
 
 class AudioPlayerViewModel(application: Application) : AndroidViewModel(application) {
 
+    companion object {
+        private const val TAG = "AudioPlayerVM"
+    }
+
     private val _state = MutableStateFlow(MusicUiState())
     val state: StateFlow<MusicUiState> = _state.asStateFlow()
 
@@ -59,52 +63,19 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
     private var playerListener: Player.Listener? = null
 
     fun init(filePath: String, playlist: List<String>) {
-        android.util.Log.d("AudioPlayer", "ViewModel.init: filePath=$filePath")
+        com.example.fold.util.FoldLogger.i(TAG, "=== init START === filePath=$filePath, lastFilePath=${MusicPlayerHolder.lastFilePath}, isActive=${MusicPlayerHolder.isActive()}, playlistSize=${MusicPlayerHolder.playlist.size}, mediaIdx=${MusicPlayerHolder.exoPlayer?.currentMediaItemIndex}, argPlaylist=${playlist.size}")
 
-        // 记录最近文件路径，供通知栏跳转
-        MusicPlayerHolder.lastFilePath = filePath
-
-        // 如果正在播放且播放器还在，尝试复用或切换
+        // 如果正在播放且播放器还在，直接复用，用当前播放的文件更新 UI
         if (MusicPlayerHolder.isActive() && MusicPlayerHolder.playlist.isNotEmpty()) {
             exoPlayer = MusicPlayerHolder.exoPlayer!!
             resolvedPlaylist = MusicPlayerHolder.playlist
-            val initIdx = resolvedPlaylist.indexOf(filePath)
-
-            // 文件不在当前播放列表 → 重新加载整个文件夹
-            if (initIdx < 0) {
-                android.util.Log.d("AudioPlayer", "file not in current playlist, reloading folder")
-                resolvedPlaylist = if (playlist.isNotEmpty()) playlist
-                else {
-                    val dir = File(filePath).parentFile
-                    dir?.listFiles()
-                        ?.filter { it.isFile && it.extension.lowercase() in audioExtensions }
-                        ?.sortedBy { it.name }
-                        ?.map { it.absolutePath }
-                        ?: listOf(filePath)
-                }
-                val newIdx = resolvedPlaylist.indexOf(filePath).coerceAtLeast(0)
-                MusicPlayerHolder.loadPlaylist(context, resolvedPlaylist, newIdx)
-                _state.value = _state.value.copy(
-                    title = filePath.substringAfterLast('/').substringBeforeLast('.'),
-                    currentIndex = newIdx,
-                    playlistSize = resolvedPlaylist.size,
-                    playlistPaths = resolvedPlaylist,
-                    audioSessionId = exoPlayer.audioSessionId,
-                    isPlaying = exoPlayer.isPlaying,
-                    duration = exoPlayer.duration.coerceAtLeast(0),
-                    currentPosition = exoPlayer.currentPosition.coerceAtLeast(0),
-                    initialized = true
-                )
-                loadAlbumArt(filePath)
-                loadLyrics(filePath)
-                attachListeners()
-                startPolling()
-                return
-            }
+            val currentIdx = exoPlayer.currentMediaItemIndex
+            val currentPath = resolvedPlaylist.getOrElse(currentIdx) { filePath }
+            com.example.fold.util.FoldLogger.i(TAG, "  Reusing player. currentIdx=$currentIdx, currentPath=$currentPath")
 
             _state.value = _state.value.copy(
-                title = filePath.substringAfterLast('/').substringBeforeLast('.'),
-                currentIndex = initIdx,
+                title = currentPath.substringAfterLast('/').substringBeforeLast('.'),
+                currentIndex = currentIdx,
                 playlistSize = resolvedPlaylist.size,
                 playlistPaths = resolvedPlaylist,
                 audioSessionId = exoPlayer.audioSessionId,
@@ -113,19 +84,17 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
                 currentPosition = exoPlayer.currentPosition.coerceAtLeast(0),
                 initialized = true
             )
-            loadAlbumArt(filePath)
-            loadLyrics(filePath)
+            com.example.fold.util.FoldLogger.i(TAG, "  → State updated: title=${_state.value.title}, idx=${_state.value.currentIndex}, playing=${_state.value.isPlaying}")
+            loadAlbumArt(currentPath)
+            loadLyrics(currentPath)
             attachListeners()
             startPolling()
-
-            // 歌曲不同 → 切换播放
-            if (exoPlayer.currentMediaItemIndex != initIdx) {
-                android.util.Log.d("AudioPlayer", "switching to index=$initIdx (was ${exoPlayer.currentMediaItemIndex})")
-                exoPlayer.seekTo(initIdx, 0)
-                exoPlayer.playWhenReady = true
-            }
             return
         }
+
+        // 新播放
+        MusicPlayerHolder.lastFilePath = filePath
+        com.example.fold.util.FoldLogger.i(TAG, "  New playback, lastFilePath=$filePath")
 
         resolvedPlaylist = if (playlist.isNotEmpty()) playlist
         else {

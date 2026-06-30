@@ -13,6 +13,7 @@ import org.apache.commons.compress.archivers.zip.ZipArchiveEntry
 import org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -88,15 +89,32 @@ object ArchiveHelper {
         val output = File(outputPath)
         try {
             val allFiles = source.walkTopDown().filter { it.isFile }.toList()
+            val totalBytes = allFiles.sumOf { it.length() }
+            var written = 0L
+            var lastReport = 0L
+            val buf = ByteArray(512 * 1024)
             ZipOutputStream(FileOutputStream(output)).use { zos ->
-                allFiles.forEachIndexed { i, file ->
-                    val entryName = file.relativeTo(source).path.replace('\\', '/')
-                    zos.putNextEntry(ZipEntry(entryName))
-                    file.inputStream().use { it.copyTo(zos) }
+                zos.setLevel(java.util.zip.Deflater.BEST_SPEED)
+                allFiles.forEachIndexed { _, file ->
+                    ensureActive()
+                    zos.putNextEntry(ZipEntry(file.relativeTo(source).path.replace('\\', '/')))
+                    BufferedInputStream(FileInputStream(file), 512 * 1024).use { input ->
+                        var len: Int
+                        while (input.read(buf).also { len = it } != -1) {
+                            ensureActive()
+                            zos.write(buf, 0, len)
+                            written += len
+                            val now = android.os.SystemClock.uptimeMillis()
+                            if (now - lastReport >= 100) {
+                                lastReport = now
+                                onProgress?.invoke(file.name, (written ushr 10).toInt(), (totalBytes ushr 10).toInt())
+                            }
+                        }
+                    }
                     zos.closeEntry()
-                    onProgress?.invoke(file.name, i + 1, allFiles.size)
                 }
             }
+            onProgress?.invoke("", (totalBytes ushr 10).toInt(), (totalBytes ushr 10).toInt())
             FoldLogger.i(TAG, "compressed ZIP: $outputPath (${output.length() / 1024}KB)")
             Result.success(outputPath)
         } catch (e: Exception) {
@@ -115,17 +133,32 @@ object ArchiveHelper {
         val output = File(outputPath)
         try {
             val allFiles = source.walkTopDown().filter { it.isFile }.toList()
-            val gzos = java.util.zip.GZIPOutputStream(FileOutputStream(output))
-            TarArchiveOutputStream(gzos).use { tar ->
+            val totalBytes = allFiles.sumOf { it.length() }
+            var written = 0L
+            var lastReport = 0L
+            val buf = ByteArray(512 * 1024)
+            TarArchiveOutputStream(java.util.zip.GZIPOutputStream(BufferedOutputStream(FileOutputStream(output), 512 * 1024))).use { tar ->
                 tar.setLongFileMode(TarArchiveOutputStream.LONGFILE_POSIX)
-                allFiles.forEachIndexed { i, file ->
-                    val entry = TarArchiveEntry(file, file.relativeTo(source).path)
-                    tar.putArchiveEntry(entry)
-                    file.inputStream().use { it.copyTo(tar) }
+                allFiles.forEachIndexed { _, file ->
+                    ensureActive()
+                    tar.putArchiveEntry(TarArchiveEntry(file, file.relativeTo(source).path))
+                    BufferedInputStream(FileInputStream(file), 512 * 1024).use { input ->
+                        var len: Int
+                        while (input.read(buf).also { len = it } != -1) {
+                            ensureActive()
+                            tar.write(buf, 0, len)
+                            written += len
+                            val now = android.os.SystemClock.uptimeMillis()
+                            if (now - lastReport >= 100) {
+                                lastReport = now
+                                onProgress?.invoke(file.name, (written ushr 10).toInt(), (totalBytes ushr 10).toInt())
+                            }
+                        }
+                    }
                     tar.closeArchiveEntry()
-                    onProgress?.invoke(file.name, i + 1, allFiles.size)
                 }
             }
+            onProgress?.invoke("", (totalBytes ushr 10).toInt(), (totalBytes ushr 10).toInt())
             FoldLogger.i(TAG, "compressed TAR.GZ: $outputPath (${output.length() / 1024}KB)")
             Result.success(outputPath)
         } catch (e: Exception) {
@@ -144,26 +177,129 @@ object ArchiveHelper {
         val output = File(outputPath)
         try {
             val allFiles = source.walkTopDown().filter { it.isFile }.toList()
+            val totalBytes = allFiles.sumOf { it.length() }
+            var written = 0L
+            var lastReport = 0L
+            val buf = ByteArray(512 * 1024)
             SevenZOutputFile(output).use { szof ->
-                allFiles.forEachIndexed { i, file ->
-                    val entryName = file.relativeTo(source).path
-                    val entry = szof.createArchiveEntry(file, entryName)
-                    szof.putArchiveEntry(entry)
-                    file.inputStream().use { input ->
-                        val buf = ByteArray(8192)
+                allFiles.forEachIndexed { _, file ->
+                    ensureActive()
+                    szof.putArchiveEntry(szof.createArchiveEntry(file, file.relativeTo(source).path))
+                    BufferedInputStream(FileInputStream(file), 512 * 1024).use { input ->
                         var len: Int
                         while (input.read(buf).also { len = it } != -1) {
+                            ensureActive()
                             szof.write(buf, 0, len)
+                            written += len
+                            val now = android.os.SystemClock.uptimeMillis()
+                            if (now - lastReport >= 100) {
+                                lastReport = now
+                                onProgress?.invoke(file.name, (written ushr 10).toInt(), (totalBytes ushr 10).toInt())
+                            }
                         }
                     }
                     szof.closeArchiveEntry()
-                    onProgress?.invoke(file.name, i + 1, allFiles.size)
                 }
             }
+            onProgress?.invoke("", (totalBytes ushr 10).toInt(), (totalBytes ushr 10).toInt())
             FoldLogger.i(TAG, "compressed 7Z: $outputPath (${output.length() / 1024}KB)")
             Result.success(outputPath)
         } catch (e: Exception) {
             FoldLogger.e(TAG, "compress7z failed: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    /** 压缩多个文件到同一个压缩包 */
+    suspend fun compressFiles(
+        files: List<File>,
+        baseDir: File,
+        outputPath: String,
+        format: String,
+        onProgress: ((String, Int, Int) -> Unit)? = null
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val totalBytes = files.sumOf { it.length() }
+            var written = 0L
+            var lastReport = 0L
+            val buf = ByteArray(512 * 1024)
+            when (format) {
+                "zip" -> {
+                    ZipOutputStream(FileOutputStream(outputPath)).use { zos ->
+                        zos.setLevel(java.util.zip.Deflater.BEST_SPEED)
+                        for (file in files) {
+                            ensureActive()
+                            val entryName = file.relativeTo(baseDir).path.replace('\\', '/')
+                            zos.putNextEntry(ZipEntry(entryName))
+                            BufferedInputStream(FileInputStream(file), 512 * 1024).use { input ->
+                                var len: Int
+                                while (input.read(buf).also { len = it } != -1) {
+                                    ensureActive()
+                                    zos.write(buf, 0, len)
+                                    written += len
+                                    val now = android.os.SystemClock.uptimeMillis()
+                                    if (now - lastReport >= 100) {
+                                        lastReport = now
+                                        onProgress?.invoke(file.name, (written ushr 10).toInt(), (totalBytes ushr 10).toInt())
+                                    }
+                                }
+                            }
+                            zos.closeEntry()
+                        }
+                    }
+                }
+                "targz" -> {
+                    TarArchiveOutputStream(java.util.zip.GZIPOutputStream(BufferedOutputStream(FileOutputStream(outputPath), 512 * 1024))).use { tar ->
+                        tar.setLongFileMode(TarArchiveOutputStream.LONGFILE_POSIX)
+                        for (file in files) {
+                            ensureActive()
+                            tar.putArchiveEntry(TarArchiveEntry(file, file.relativeTo(baseDir).path))
+                            BufferedInputStream(FileInputStream(file), 512 * 1024).use { input ->
+                                var len: Int
+                                while (input.read(buf).also { len = it } != -1) {
+                                    ensureActive()
+                                    tar.write(buf, 0, len)
+                                    written += len
+                                    val now = android.os.SystemClock.uptimeMillis()
+                                    if (now - lastReport >= 100) {
+                                        lastReport = now
+                                        onProgress?.invoke(file.name, (written ushr 10).toInt(), (totalBytes ushr 10).toInt())
+                                    }
+                                }
+                            }
+                            tar.closeArchiveEntry()
+                        }
+                    }
+                }
+                "7z" -> {
+                    SevenZOutputFile(File(outputPath)).use { szof ->
+                        for (file in files) {
+                            ensureActive()
+                            szof.putArchiveEntry(szof.createArchiveEntry(file, file.relativeTo(baseDir).path))
+                            BufferedInputStream(FileInputStream(file), 512 * 1024).use { input ->
+                                var len: Int
+                                while (input.read(buf).also { len = it } != -1) {
+                                    ensureActive()
+                                    szof.write(buf, 0, len)
+                                    written += len
+                                    val now = android.os.SystemClock.uptimeMillis()
+                                    if (now - lastReport >= 100) {
+                                        lastReport = now
+                                        onProgress?.invoke(file.name, (written ushr 10).toInt(), (totalBytes ushr 10).toInt())
+                                    }
+                                }
+                            }
+                            szof.closeArchiveEntry()
+                        }
+                    }
+                }
+                else -> return@withContext Result.failure(Exception("Unsupported format: $format"))
+            }
+            onProgress?.invoke("", (totalBytes ushr 10).toInt(), (totalBytes ushr 10).toInt())
+            FoldLogger.i(TAG, "compressedFiles: $outputPath (${File(outputPath).length() / 1024}KB)")
+            Result.success(outputPath)
+        } catch (e: Exception) {
+            FoldLogger.e(TAG, "compressFiles failed: ${e.message}")
             Result.failure(e)
         }
     }

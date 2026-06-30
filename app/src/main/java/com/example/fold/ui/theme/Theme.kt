@@ -133,11 +133,15 @@ fun FoldTheme(
             window.navigationBarColor = Color.TRANSPARENT
         }
 
-        // 状态栏颜色跟随主题变化（轻量级，可以放 SideEffect）
+        // 状态栏和导航栏颜色跟随主题变化
         SideEffect {
             @Suppress("DEPRECATION")
             window.statusBarColor = (if (darkTheme) DarkColors.background else LightColors.background).toArgb()
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            @Suppress("DEPRECATION")
+            window.navigationBarColor = (if (darkTheme) DarkColors.background else LightColors.background).toArgb()
+            val controller = WindowCompat.getInsetsController(window, view)
+            controller.isAppearanceLightStatusBars = !darkTheme
+            controller.isAppearanceLightNavigationBars = !darkTheme
         }
     }
 
