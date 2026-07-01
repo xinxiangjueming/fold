@@ -9,6 +9,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -21,6 +22,7 @@ import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.input.pointer.pointerInput
 import top.yukonga.miuix.kmp.basic.Slider as MiuixSlider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,6 +71,11 @@ fun AudioPlayerScreen(
     LaunchedEffect(filePath) {
         com.example.fold.util.FoldLogger.i("AudioPlayer", "=== Screen LaunchedEffect === filePath=$filePath, lastFilePath=${MusicPlayerHolder.lastFilePath}, mediaIdx=${MusicPlayerHolder.exoPlayer?.currentMediaItemIndex}, state.title=${state.title}, state.idx=${state.currentIndex}")
         vm.init(filePath, playlist)
+    }
+
+    // 沉浸模式日志
+    LaunchedEffect(state.isImmersive) {
+        android.util.Log.d("AudioPlayer", "isImmersive changed: ${state.isImmersive}")
     }
 
     // 歌词行自动滚动
@@ -169,22 +176,25 @@ fun AudioPlayerScreen(
                     onPrev = { vm.prev() },
                     onToggle = { vm.togglePlay() },
                     onNext = { vm.next() },
+                    onLongPressToggle = { vm.toggleImmersive() },
                     tint = onSurface
                 )
 
                 Spacer(Modifier.height(8.dp))
 
-                // 功能按钮
-                FeatureButtons(
-                    loopMode = state.loopMode,
-                    sleepActive = state.sleepRemaining != 0,
-                    onLoopChange = { vm.cycleLoopMode() },
-                    onSleepClick = { showSleepDialog = true },
-                    onEqualizerClick = handleEqualizerClick,
-                    onPlaylistClick = { showPlaylist = true },
-                    primaryColor = MaterialTheme.colorScheme.primary,
-                    variantColor = onSurfaceVar
-                )
+                // 功能按钮（沉浸模式隐藏）
+                if (!state.isImmersive) {
+                    FeatureButtons(
+                        loopMode = state.loopMode,
+                        sleepActive = state.sleepRemaining != 0,
+                        onLoopChange = { vm.cycleLoopMode() },
+                        onSleepClick = { showSleepDialog = true },
+                        onEqualizerClick = handleEqualizerClick,
+                        onPlaylistClick = { showPlaylist = true },
+                        primaryColor = MaterialTheme.colorScheme.primary,
+                        variantColor = onSurfaceVar
+                    )
+                }
             }
 
             // 右侧：歌词
@@ -248,38 +258,35 @@ fun AudioPlayerScreen(
             .padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // ===== TopBar =====
-        TopAppBar(
-            title = { Text(stringResource(R.string.audio_player_title)) },
-            navigationIcon = {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = stringResource(R.string.action_back))
-                }
-            },
-            actions = {
-                // USB 独占模式按钮 — 暂时禁用
-                // if (MusicPlayerHolder.isExclusiveSupported()) {
-                //     IconButton(onClick = { showUsbDialog = true }) {
-                //         Icon(Icons.Default.Usb, contentDescription = "USB 独占",
-                //             tint = if (isExclusive) MaterialTheme.colorScheme.primary else onSurfaceVar)
-                //     }
-                // }
-                if (state.sleepRemaining > 0) {
-                    Text("${state.sleepRemaining}min",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(end = 8.dp))
-                } else if (state.sleepRemaining == -1) {
-                    Text(stringResource(R.string.sleep_timer_waiting),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(end = 8.dp))
-                }
-            },
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = MaterialTheme.colorScheme.background)
-        )
+        // ===== TopBar（沉浸模式隐藏）=====
+        if (!state.isImmersive) {
+            TopAppBar(
+                title = { Text(stringResource(R.string.audio_player_title)) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.action_back))
+                    }
+                },
+                actions = {
+                    if (state.sleepRemaining > 0) {
+                        Text("${state.sleepRemaining}min",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(end = 8.dp))
+                    } else if (state.sleepRemaining == -1) {
+                        Text(stringResource(R.string.sleep_timer_waiting),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(end = 8.dp))
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background)
+            )
+        } else {
+            Spacer(Modifier.height(48.dp))
+        }
 
         Spacer(Modifier.weight(0.5f))
 
@@ -326,22 +333,25 @@ fun AudioPlayerScreen(
             onPrev = { vm.prev() },
             onToggle = { vm.togglePlay() },
             onNext = { vm.next() },
+            onLongPressToggle = { vm.toggleImmersive() },
             tint = onSurface
         )
 
         Spacer(Modifier.height(12.dp))
 
-        // ===== 功能按钮行 =====
-        FeatureButtons(
-            loopMode = state.loopMode,
-            sleepActive = state.sleepRemaining != 0,
-            onLoopChange = { vm.cycleLoopMode() },
-            onSleepClick = { showSleepDialog = true },
-            onEqualizerClick = handleEqualizerClick,
-            onPlaylistClick = { showPlaylist = true },
-            primaryColor = MaterialTheme.colorScheme.primary,
-            variantColor = onSurfaceVar
-        )
+        // ===== 功能按钮行（沉浸模式隐藏）=====
+        if (!state.isImmersive) {
+            FeatureButtons(
+                loopMode = state.loopMode,
+                sleepActive = state.sleepRemaining != 0,
+                onLoopChange = { vm.cycleLoopMode() },
+                onSleepClick = { showSleepDialog = true },
+                onEqualizerClick = handleEqualizerClick,
+                onPlaylistClick = { showPlaylist = true },
+                primaryColor = MaterialTheme.colorScheme.primary,
+                variantColor = onSurfaceVar
+            )
+        }
 
         Spacer(Modifier.weight(0.5f))
     }
@@ -530,6 +540,7 @@ private fun PlaybackControls(
     onPrev: () -> Unit,
     onToggle: () -> Unit,
     onNext: () -> Unit,
+    onLongPressToggle: () -> Unit,
     tint: Color
 ) {
     Row(
@@ -540,10 +551,24 @@ private fun PlaybackControls(
             Icon(Icons.Filled.SkipPrevious, contentDescription = null,
                 modifier = Modifier.size(36.dp), tint = tint)
         }
-        FilledIconButton(onClick = onToggle, modifier = Modifier.size(64.dp)) {
+        Box(
+            modifier = Modifier
+                .size(64.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primary)
+                .combinedClickable(
+                    onClick = onToggle,
+                    onLongClick = {
+                        android.util.Log.d("AudioPlayer", "Play button long click → toggleImmersive")
+                        onLongPressToggle()
+                    }
+                ),
+            contentAlignment = Alignment.Center
+        ) {
             Icon(
                 if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                contentDescription = null, modifier = Modifier.size(36.dp)
+                contentDescription = null, modifier = Modifier.size(36.dp),
+                tint = MaterialTheme.colorScheme.onPrimary
             )
         }
         IconButton(onClick = onNext) {

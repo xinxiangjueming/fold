@@ -41,6 +41,7 @@ data class MusicUiState(
     val audioSessionId: Int = -1,
     val playlistPaths: List<String> = emptyList(),
     val initialized: Boolean = false,
+    val isImmersive: Boolean = false,
 )
 
 class AudioPlayerViewModel(application: Application) : AndroidViewModel(application) {
@@ -317,6 +318,12 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
         if (_state.value.lyrics.isNotEmpty()) {
             _state.value = _state.value.copy(showLyrics = !_state.value.showLyrics)
         }
+    }
+
+    fun toggleImmersive() {
+        val new = !_state.value.isImmersive
+        android.util.Log.d("AudioPlayer", "toggleImmersive: ${_state.value.isImmersive} -> $new")
+        _state.value = _state.value.copy(isImmersive = new)
     }
 
     // ===== 睡眠定时 =====
