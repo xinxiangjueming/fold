@@ -64,6 +64,8 @@ class ReaderViewModel : ViewModel() {
     private var userFontSize = prefs.getFloat(KEY_FONT_SIZE, 16f)
     private var userLineSpacing = prefs.getFloat(KEY_LINE_SPACING, 1.5f)
     private var userFontPath = prefs.getString(KEY_FONT_PATH, "") ?: ""
+    // 跟踪用户是否手动选过主题（false = 跟随系统，true = 用户手动选择）
+    private var userManuallySetTheme = prefs.contains(KEY_READING_THEME)
     private var userThemeName = run {
         val saved = prefs.getString(KEY_READING_THEME, null)
         if (saved != null) {
@@ -82,8 +84,26 @@ class ReaderViewModel : ViewModel() {
     private var userVolumePageTurn = prefs.getBoolean(KEY_VOLUME_PAGE_TURN, false)
     private var userStealthMode = prefs.getBoolean(KEY_STEALTH_MODE, false)
 
+    // 监听系统深色模式变化
+    private val configCallback = object : android.content.ComponentCallbacks {
+        override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+            if (!userManuallySetTheme) {
+                val nightMode = newConfig.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK
+                val newTheme = if (nightMode == android.content.res.Configuration.UI_MODE_NIGHT_YES)
+                    ReadingTheme.DARK else ReadingTheme.LIGHT
+                if (newTheme.label != userThemeName) {
+                    userThemeName = newTheme.label
+                    _state.update { it.copy(readingTheme = newTheme) }
+                    FoldLogger.i(TAG, "System dark mode changed, theme → ${newTheme.label}")
+                }
+            }
+        }
+        override fun onLowMemory() {}
+    }
+
     init {
-        FoldLogger.i(TAG, "init: fontPath='$userFontPath', fontSize=$userFontSize, lineSpacing=$userLineSpacing, theme=$userThemeName")
+        FoldLogger.i(TAG, "init: fontPath='$userFontPath', fontSize=$userFontSize, lineSpacing=$userLineSpacing, theme=$userThemeName, manualTheme=$userManuallySetTheme")
+        context.registerComponentCallbacks(configCallback)
         if (userFontPath.isNotEmpty() && !File(userFontPath).exists()) {
             FoldLogger.w(TAG, "init: font file missing, resetting: $userFontPath")
             userFontPath = ""
@@ -394,6 +414,7 @@ class ReaderViewModel : ViewModel() {
 
     fun updateReadingTheme(theme: ReadingTheme) {
         FoldLogger.d(TAG, "updateReadingTheme: oldTheme=${_state.value.readingTheme}, newTheme=$theme")
+        userManuallySetTheme = true
         _state.update { it.copy(readingTheme = theme) }
         prefs.edit().putString(KEY_READING_THEME, theme.label).apply()
     }
@@ -648,6 +669,7 @@ class ReaderViewModel : ViewModel() {
     override fun onCleared() {
         FoldLogger.i(TAG, "onCleared")
         super.onCleared()
+        context.unregisterComponentCallbacks(configCallback)
         readerJob?.cancel()
         ttsManager.release()
         _pdfPageBitmap.value?.recycle()

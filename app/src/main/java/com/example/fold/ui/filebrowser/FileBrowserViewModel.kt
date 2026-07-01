@@ -317,6 +317,8 @@ class FileBrowserViewModel : ViewModel() {
         }
     }
 
+    fun getRootPath(): String = localFileProvider.getRootPath()
+
     fun navigateUp() {
         val current = _state.value.currentPath
         val root = localFileProvider.getRootPath()

@@ -17,7 +17,6 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.navArgument
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.fold.MainActivity
-import com.example.fold.ui.common.PredictiveBackScreen
 import com.example.fold.ui.eq.EqScreen
 import com.example.fold.ui.filebrowser.FileBrowserScreen
 import com.example.fold.ui.calculator.CalculatorScreen
@@ -31,6 +30,9 @@ import com.example.fold.ui.reader.ReaderScreen
 import com.example.fold.ui.viewer.ArchiveViewerScreen
 import com.example.fold.ui.viewer.ImageViewerScreen
 import com.example.fold.util.FoldLogger
+import com.example.fold.ui.common.PredictiveBackScreen
+import com.example.fold.ui.common.PredictiveBackManager
+import androidx.compose.ui.platform.LocalView
 
 object Routes {
     const val CALCULATOR = "calculator"
@@ -75,14 +77,6 @@ private const val ANIM_DURATION = 250
 @Composable
 fun AppNavGraph(navController: NavHostController) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val view = androidx.compose.ui.platform.LocalView.current
-
-    // 包装 navigate，在跳转前截取当前页面
-    val navigateWithCapture: (String) -> Unit = { route ->
-        FoldLogger.d("PredictiveBack", "navigateWithCapture: capturing screen before navigating to $route")
-        com.example.fold.ui.common.PredictiveBackManager.captureCurrentScreen(view)
-        navController.navigate(route)
-    }
 
     // 通知栏点击 → 自动打开播放页
     androidx.compose.runtime.LaunchedEffect(Unit) {
@@ -206,18 +200,10 @@ fun AppNavGraph(navController: NavHostController) {
         NavHost(
         navController = navController,
         startDestination = startDest,
-        enterTransition = {
-            EnterTransition.None
-        },
-        exitTransition = {
-            ExitTransition.None
-        },
-        popEnterTransition = {
-            EnterTransition.None
-        },
-        popExitTransition = {
-            ExitTransition.None
-        }
+        enterTransition = { fadeIn(tween(ANIM_DURATION)) },
+        exitTransition = { fadeOut(tween(ANIM_DURATION)) },
+        popEnterTransition = { fadeIn(tween(ANIM_DURATION)) },
+        popExitTransition = { fadeOut(tween(ANIM_DURATION)) }
     ) {
         composable(Routes.CALCULATOR) {
             CalculatorScreen(
@@ -230,28 +216,46 @@ fun AppNavGraph(navController: NavHostController) {
         }
 
         composable(Routes.FILE_BROWSER) {
+            val view = LocalView.current
+            androidx.compose.runtime.LaunchedEffect(Unit) {
+                FoldLogger.i("NavGraph", "FILE_BROWSER destination composed, backStack=${navController.currentBackStackEntry?.destination?.route}")
+            }
             FileBrowserScreen(
                 onFileClick = { filePath ->
-                    navigateWithCapture(Routes.reader(filePath))
+                    // 目录点击由 FileBrowserScreen 内部处理（截图+导航）
+                    // 非目录文件点击：由 FileBrowserScreen 判断后调用对应回调
+                    FoldLogger.i("NavGraph", "onFileClick: $filePath")
                 },
                 onImageClick = { filePath ->
-                    navigateWithCapture(Routes.image(filePath))
+                    FoldLogger.i("NavGraph", "onImageClick: capturing screenshot")
+                    PredictiveBackManager.captureCurrentScreen(view)
+                    navController.navigate(Routes.image(filePath))
                 },
                 onArchiveClick = { filePath ->
-                    navigateWithCapture(Routes.archive(filePath))
+                    FoldLogger.i("NavGraph", "onArchiveClick: capturing screenshot")
+                    PredictiveBackManager.captureCurrentScreen(view)
+                    navController.navigate(Routes.archive(filePath))
                 },
                 onVideoClick = { filePath ->
-                    navigateWithCapture(Routes.video(filePath))
+                    FoldLogger.i("NavGraph", "onVideoClick: capturing screenshot")
+                    PredictiveBackManager.captureCurrentScreen(view)
+                    navController.navigate(Routes.video(filePath))
                 },
                 onAudioClick = { filePath ->
+                    FoldLogger.i("NavGraph", "onAudioClick: capturing screenshot")
+                    PredictiveBackManager.captureCurrentScreen(view)
                     navController.popBackStack(Routes.AUDIO_BASE, true)
-                    navigateWithCapture(Routes.audio(filePath))
+                    navController.navigate(Routes.audio(filePath))
                 },
                 onNavigateToHiddenApps = {
-                    navigateWithCapture(Routes.HIDDEN_APPS)
+                    FoldLogger.i("NavGraph", "onNavigateToHiddenApps: capturing screenshot")
+                    PredictiveBackManager.captureCurrentScreen(view)
+                    navController.navigate(Routes.HIDDEN_APPS)
                 },
                 onNavigateToTrash = {
-                    navigateWithCapture(Routes.TRASH)
+                    FoldLogger.i("NavGraph", "onNavigateToTrash: capturing screenshot")
+                    PredictiveBackManager.captureCurrentScreen(view)
+                    navController.navigate(Routes.TRASH)
                 }
             )
         }
@@ -273,9 +277,9 @@ fun AppNavGraph(navController: NavHostController) {
         }
 
         composable(Routes.TRASH) {
+            val viewModel: com.example.fold.ui.filebrowser.FileBrowserViewModel = viewModel()
+            val trashEnabled by viewModel.trashEnabled.collectAsState()
             PredictiveBackScreen(onBack = { navController.popBackStack() }) {
-                val viewModel: com.example.fold.ui.filebrowser.FileBrowserViewModel = viewModel()
-                val trashEnabled by viewModel.trashEnabled.collectAsState()
                 com.example.fold.ui.trash.TrashScreen(
                     onBack = { navController.popBackStack() },
                     trashEnabled = trashEnabled,
@@ -296,18 +300,10 @@ fun AppNavGraph(navController: NavHostController) {
         ) { backStackEntry ->
             val encodedPath = backStackEntry.arguments?.getString("filePath") ?: ""
             val filePath = android.net.Uri.decode(encodedPath)
-            PredictiveBackScreen(onBack = {
-                FoldLogger.d("PredictiveBack", "ReaderScreen PredictiveBackScreen.onBack: calling popBackStack()")
-                navController.popBackStack()
-                FoldLogger.d("PredictiveBack", "ReaderScreen PredictiveBackScreen.onBack: popBackStack() returned")
-            }) {
+            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
                 ReaderScreen(
                     filePath = filePath,
-                    onBack = {
-                        FoldLogger.d("PredictiveBack", "ReaderScreen onBack: calling popBackStack()")
-                        navController.popBackStack()
-                        FoldLogger.d("PredictiveBack", "ReaderScreen onBack: popBackStack() returned")
-                    }
+                    onBack = { navController.popBackStack() }
                 )
             }
         }
@@ -372,7 +368,7 @@ fun AppNavGraph(navController: NavHostController) {
                 AudioPlayerScreen(
                     filePath = filePath,
                     onBack = { navController.popBackStack() },
-                    onNavigateToEq = { navigateWithCapture(Routes.EQ) }
+                    onNavigateToEq = { navController.navigate(Routes.EQ) }
                 )
             }
         }
@@ -401,4 +397,3 @@ fun AppNavGraph(navController: NavHostController) {
     }
 }
 }
-

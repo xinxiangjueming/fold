@@ -2,8 +2,6 @@ package com.example.fold.ui.common
 
 import android.graphics.Bitmap
 import androidx.activity.compose.PredictiveBackHandler
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,9 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
-import androidx.core.view.drawToBitmap
 import kotlinx.coroutines.CancellationException
 
 /**
@@ -62,30 +58,30 @@ object PredictiveBackManager {
 fun PredictiveBackScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     content: @Composable () -> Unit
 ) {
+    android.util.Log.d("PredictiveBack", "PredictiveBackScreen composed: enabled=$enabled, screenshot=${PredictiveBackManager.previousScreenshot != null}")
     var progress by remember { mutableFloatStateOf(0f) }
-    var isGestureActive by remember { mutableStateOf(false) }
-    var isFinishing by remember { mutableStateOf(false) }
+    val hasScreenshot = PredictiveBackManager.previousScreenshot != null
+    val gestureEnabled = enabled && hasScreenshot
+    android.util.Log.d("PredictiveBack", "PredictiveBackScreen: enabled=$enabled, hasScreenshot=$hasScreenshot, gestureEnabled=$gestureEnabled")
 
-    PredictiveBackHandler(enabled = true) { backEvent ->
+    // PredictiveBackHandler 放在 content 外面，避免 content 重组时协程被取消
+    PredictiveBackHandler(enabled = gestureEnabled) { backEvent ->
         try {
             android.util.Log.d("PredictiveBack", "Gesture STARTED, screenshot=${PredictiveBackManager.previousScreenshot != null}")
             backEvent.collect { event ->
                 progress = event.progress
-                isGestureActive = true
                 android.util.Log.d("PredictiveBack", "Gesture PROGRESS: progress=${event.progress}")
             }
             // 手势完成
-            isFinishing = true
             progress = 1f
-            android.util.Log.d("PredictiveBack", "Gesture COMPLETED, isFinishing=true, progress=1f")
+            android.util.Log.d("PredictiveBack", "Gesture COMPLETED, progress=1f")
             onBack()
             android.util.Log.d("PredictiveBack", "onBack() RETURNED")
         } catch (e: CancellationException) {
             android.util.Log.d("PredictiveBack", "Gesture CANCELLED, resetting state")
-            isGestureActive = false
-            isFinishing = false
             progress = 0f
         }
     }
@@ -95,7 +91,7 @@ fun PredictiveBackScreen(
     val cornerRadius = 16f + (progress * 8f)
 
     if (progress > 0.01f) {
-        android.util.Log.d("PredictiveBack", "Rendering: progress=$progress scale=$scale")
+        android.util.Log.d("PredictiveBack", "Rendering: progress=$progress scale=$scale screenshot=${PredictiveBackManager.previousScreenshot != null}")
     }
 
     Box(modifier = modifier.fillMaxSize()) {

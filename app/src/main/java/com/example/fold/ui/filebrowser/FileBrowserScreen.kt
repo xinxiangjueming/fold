@@ -86,6 +86,33 @@ fun FileBrowserScreen(
         onDispose { viewModel.onCalculatorModeChanged = null }
     }
 
+    val isAtRoot = state.currentPath == viewModel.getRootPath()
+    val hasScreenshot = com.example.fold.ui.common.PredictiveBackManager.previousScreenshot != null
+
+    var pbProgress by remember { mutableFloatStateOf(0f) }
+    androidx.activity.compose.PredictiveBackHandler(enabled = !isAtRoot && hasScreenshot) { backEvent ->
+        try {
+            backEvent.collect { event -> pbProgress = event.progress }
+            pbProgress = 1f
+            viewModel.navigateUp()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            pbProgress = 0f
+        }
+    }
+
+    val isDialogOpen = state.selectionMode || state.renamingFile != null ||
+        state.showSortDialog || state.showHttpDialog || state.showBatchCompressDialog
+    BackHandler(enabled = isDialogOpen || (!isAtRoot && !hasScreenshot)) {
+        when {
+            state.selectionMode -> viewModel.toggleSelectionMode()
+            state.renamingFile != null -> viewModel.cancelRename()
+            state.showSortDialog -> viewModel.hideSortDialog()
+            state.showHttpDialog -> viewModel.hideHttpDialog()
+            state.showBatchCompressDialog -> viewModel.dismissBatchCompressDialog()
+            !isAtRoot -> viewModel.navigateUp()
+        }
+    }
+
     LaunchedEffect(Unit) {
         FoldLogger.i(TAG, "FileBrowserScreen: composed, path=${state.currentPath}, files=${files.size}")
         com.example.fold.util.ShizukuHelper.recheck()
