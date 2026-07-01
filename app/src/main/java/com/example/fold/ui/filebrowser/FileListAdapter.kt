@@ -19,8 +19,9 @@ class FileListAdapter(
     var isDark: Boolean,
     var selectionMode: Boolean = false,
     var selectedFiles: Set<String> = emptySet(),
-    var onToggleSelection: ((FileItem) -> Unit)? = null
-) : ListAdapter<FileItem, FileListAdapter.VH>(Diff) {
+    var onToggleSelection: ((FileItem) -> Unit)? = null,
+    var viewMode: ViewMode = ViewMode.LIST
+) : ListAdapter<FileItem, RecyclerView.ViewHolder>(Diff) {
 
     init { setHasStableIds(true) }
 
@@ -31,20 +32,33 @@ class FileListAdapter(
 
     override fun getItemId(position: Int): Long = getItem(position).path.hashCode().toLong()
 
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
-        val view = LayoutInflater.from(parent.context).inflate(R.layout.item_file, parent, false)
-        return VH(view)
+    override fun getItemViewType(position: Int): Int = if (viewMode == ViewMode.GRID) TYPE_GRID else TYPE_LIST
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
+        return if (viewType == TYPE_GRID) {
+            val view = LayoutInflater.from(parent.context).inflate(R.layout.item_file_grid, parent, false)
+            GridVH(view)
+        } else {
+            val view = LayoutInflater.from(parent.context).inflate(R.layout.item_file, parent, false)
+            VH(view)
+        }
     }
 
-    override fun onBindViewHolder(holder: VH, position: Int) {
+    override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
         val file = getItem(position)
         val isSelected = selectedFiles.contains(file.path)
-        holder.bind(file, isDark, isSelected, selectionMode, onClick, onLongPress, onToggleSelection)
+        when (holder) {
+            is VH -> holder.bind(file, isDark, isSelected, selectionMode, onClick, onLongPress, onToggleSelection)
+            is GridVH -> holder.bind(file, isDark, isSelected, selectionMode, onClick, onLongPress, onToggleSelection)
+        }
     }
 
-    override fun onViewRecycled(holder: VH) {
+    override fun onViewRecycled(holder: RecyclerView.ViewHolder) {
         super.onViewRecycled(holder)
-        holder.recycle()
+        when (holder) {
+            is VH -> holder.recycle()
+            is GridVH -> holder.recycle()
+        }
     }
 
     fun updateTheme(newIsDark: Boolean) {
@@ -69,6 +83,83 @@ class FileListAdapter(
     override fun onDetachedFromRecyclerView(rv: RecyclerView) {
         super.onDetachedFromRecyclerView(rv)
         recyclerView = null
+    }
+
+    class GridVH(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        private val icon: ImageView = itemView.findViewById(R.id.icon)
+        private val iconBackground: View = itemView.findViewById(R.id.icon_background)
+        private val thumbnail: ImageView = itemView.findViewById(R.id.thumbnail)
+        private val title: TextView = itemView.findViewById(R.id.title)
+        private val selectionIcon: ImageView? = itemView.findViewById(R.id.selection_icon)
+
+        fun bind(file: FileItem, isDark: Boolean, isSelected: Boolean, selectionMode: Boolean,
+                 onClick: (FileItem) -> Unit, onLongPress: (FileItem) -> Unit,
+                 onToggleSelection: ((FileItem) -> Unit)?) {
+            val hasThumb = VH.hasThumbnail(file)
+
+            if (hasThumb) {
+                iconBackground.visibility = View.GONE
+                icon.visibility = View.GONE
+                thumbnail.visibility = View.VISIBLE
+                val bgDrawable = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = 12f * itemView.context.resources.displayMetrics.density
+                    setColor(if (isDark) 0xFF2A2A2A.toInt() else 0xFFF5F5F5.toInt())
+                }
+                thumbnail.background = bgDrawable
+                ThumbnailLoader.loadThumbnail(thumbnail, File(file.path), isDark)
+            } else {
+                iconBackground.visibility = View.VISIBLE
+                icon.visibility = View.VISIBLE
+                thumbnail.visibility = View.GONE
+                val bgColor = VH.getIconBackgroundColor(file, isDark)
+                val bgDrawable = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(bgColor)
+                }
+                iconBackground.background = bgDrawable
+                ThumbnailLoader.cancelLoad(thumbnail)
+                icon.setImageResource(VH.getIconRes(file))
+            }
+
+            title.text = file.name
+            val titleColor = if (isDark) 0xFFE0E0E0.toInt() else 0xFF1F1F1F.toInt()
+            title.setTextColor(titleColor)
+
+            if (selectionMode) {
+                selectionIcon?.visibility = View.VISIBLE
+                selectionIcon?.setImageResource(if (isSelected) R.drawable.ic_check_circle_filled else R.drawable.ic_check_circle_outline)
+                selectionIcon?.setColorFilter(if (isSelected) 0xFF2196F3.toInt() else if (isDark) 0xFF666666.toInt() else 0xFFAAAAAA.toInt())
+                itemView.alpha = if (isSelected) 0.85f else 1.0f
+                if (isSelected) {
+                    val radius = 14f * itemView.context.resources.displayMetrics.density
+                    itemView.background = GradientDrawable().apply {
+                        shape = GradientDrawable.RECTANGLE
+                        cornerRadius = radius
+                        setColor(if (isDark) 0x402196F3.toInt() else 0x202196F3.toInt())
+                    }
+                } else {
+                    itemView.background = android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)
+                }
+            } else {
+                selectionIcon?.visibility = View.GONE
+                itemView.alpha = 1.0f
+                itemView.background = android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)
+            }
+
+            itemView.setOnClickListener {
+                if (selectionMode) onToggleSelection?.invoke(file) else onClick(file)
+            }
+            itemView.setOnLongClickListener {
+                if (selectionMode) onToggleSelection?.invoke(file) else onLongPress(file)
+                true
+            }
+        }
+
+        fun recycle() {
+            val thumbnail = itemView.findViewById<ImageView>(R.id.thumbnail)
+            ThumbnailLoader.cancelLoad(thumbnail)
+        }
     }
 
     class VH(itemView: View) : RecyclerView.ViewHolder(itemView) {
@@ -210,5 +301,7 @@ class FileListAdapter(
 
     companion object {
         const val PAYLOAD_THEME = 1
+        const val TYPE_LIST = 0
+        const val TYPE_GRID = 1
     }
 }

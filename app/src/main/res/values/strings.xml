@@ -125,8 +125,8 @@
     <string name="action_compress_targz">压缩为 TAR.GZ</string>
     <string name="action_compress_7z">压缩为 7Z</string>
     <string name="compress_format_title">选择压缩格式</string>
-    <string name="calculator_mode_on">开启计算器伪装</string>
-    <string name="calculator_mode_off">关闭计算器伪装</string>
+    <string name="calculator_mode_on">计算器伪装</string>
+    <string name="calculator_mode_off">计算器伪装</string>
 
     <!-- 隐藏应用 -->
     <string name="hidden_apps">隐藏应用</string>

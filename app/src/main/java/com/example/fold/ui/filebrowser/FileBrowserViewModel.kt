@@ -37,6 +37,15 @@ enum class SortMode(val prefValue: String) {
     }
 }
 
+enum class ViewMode(val prefValue: String) {
+    LIST("list"),
+    GRID("grid");
+
+    companion object {
+        fun fromPref(value: String?) = entries.find { it.prefValue == value } ?: LIST
+    }
+}
+
 data class FileBrowserState(
     val currentPath: String = "",
     val files: List<FileItem> = emptyList(),
@@ -75,6 +84,8 @@ data class FileBrowserState(
     val showBatchCompressDialog: Boolean = false,
     // 外部存储设备
     val storageVolumes: List<StorageVolume> = emptyList(),
+    // 视图模式
+    val viewMode: ViewMode = ViewMode.LIST,
 )
 
 data class StorageVolume(
@@ -165,10 +176,12 @@ class FileBrowserViewModel : ViewModel() {
         switchLauncherAlias(_calculatorMode.value)
         val globalMode = SortMode.fromPref(prefs.getString("global_sort", null))
         val showHidden = prefs.getBoolean("show_hidden", false)
+        val savedViewMode = ViewMode.fromPref(prefs.getString("view_mode", null))
         _state.update { it.copy(
             isServerRunning = AppContainer.isServerRunning,
             sortMode = globalMode,
             showHiddenFiles = showHidden,
+            viewMode = savedViewMode,
             shizukuAvailable = ShizukuHelper.available.value,
             shizukuGranted = ShizukuHelper.granted.value
         ) }
@@ -604,6 +617,14 @@ class FileBrowserViewModel : ViewModel() {
         prefs.edit().putBoolean("show_hidden", newValue).apply()
         _state.update { it.copy(showHiddenFiles = newValue) }
         refresh()
+    }
+
+    fun toggleViewMode() {
+        val old = _state.value.viewMode
+        val new = if (old == ViewMode.LIST) ViewMode.GRID else ViewMode.LIST
+        FoldLogger.i(TAG, "toggleViewMode: $old -> $new")
+        prefs.edit().putString("view_mode", new.prefValue).apply()
+        _state.update { it.copy(viewMode = new) }
     }
 
     fun showHttpDialog() {

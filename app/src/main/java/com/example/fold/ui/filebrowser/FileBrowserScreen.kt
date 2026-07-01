@@ -314,6 +314,16 @@ fun FileBrowserScreen(
                                         onClick = { showMoreMenu = false; viewModel.showSortDialog() },
                                         leadingIcon = { Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = null) }
                                     )
+                                    DropdownMenuItem(
+                                        text = { Text(if (state.viewMode == ViewMode.GRID) "列表视图" else "宫格视图") },
+                                        onClick = { showMoreMenu = false; viewModel.toggleViewMode() },
+                                        leadingIcon = {
+                                            Icon(
+                                                if (state.viewMode == ViewMode.GRID) Icons.Filled.ViewList else Icons.Filled.GridView,
+                                                contentDescription = null
+                                            )
+                                        }
+                                    )
                                     val darkMode = LocalDarkMode.current
                                     DropdownMenuItem(
                                         text = {
@@ -343,16 +353,16 @@ fun FileBrowserScreen(
                                         leadingIcon = { Icon(if (state.showHiddenFiles) Icons.Filled.VisibilityOff else Icons.Filled.Visibility, contentDescription = null) }
                                     )
                                     DropdownMenuItem(
-                                        text = { Text(stringResource(if (calculatorMode) R.string.calculator_mode_off else R.string.calculator_mode_on)) },
-                                        onClick = { showMoreMenu = false; viewModel.toggleCalculatorMode() },
-                                        leadingIcon = { Icon(Icons.Filled.Calculate, contentDescription = null) }
-                                    )
-                                    DropdownMenuItem(
                                         text = { Text(stringResource(R.string.hidden_apps)) },
                                         onClick = { showMoreMenu = false; onNavigateToHiddenApps() },
                                         leadingIcon = { Icon(Icons.Filled.HideSource, contentDescription = null) }
                                     )
                                     HorizontalDivider()
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(if (calculatorMode) R.string.calculator_mode_off else R.string.calculator_mode_on)) },
+                                        onClick = { showMoreMenu = false; viewModel.toggleCalculatorMode() },
+                                        leadingIcon = { Icon(Icons.Filled.Calculate, contentDescription = null) }
+                                    )
                                     DropdownMenuItem(
                                         text = { Text(stringResource(R.string.http_server)) },
                                         onClick = {
@@ -518,7 +528,8 @@ fun FileBrowserScreen(
                             isDark = isDark,
                             selectionMode = state.selectionMode,
                             selectedFiles = state.selectedFiles,
-                            onToggleSelection = { file -> viewModel.toggleFileSelection(file) }
+                            onToggleSelection = { file -> viewModel.toggleFileSelection(file) },
+                            viewMode = state.viewMode
                         )
                     }
                     LaunchedEffect(files) {
@@ -530,6 +541,10 @@ fun FileBrowserScreen(
                     LaunchedEffect(state.selectionMode, state.selectedFiles) {
                         adapter.selectionMode = state.selectionMode
                         adapter.selectedFiles = state.selectedFiles
+                        adapter.notifyDataSetChanged()
+                    }
+                    LaunchedEffect(state.viewMode) {
+                        adapter.viewMode = state.viewMode
                         adapter.notifyDataSetChanged()
                     }
                     // 路径变化时恢复滚动位置
@@ -547,7 +562,11 @@ fun FileBrowserScreen(
                     AndroidView(
                         factory = { ctx ->
                             androidx.recyclerview.widget.RecyclerView(ctx).apply {
-                                layoutManager = androidx.recyclerview.widget.LinearLayoutManager(ctx)
+                                layoutManager = if (state.viewMode == ViewMode.GRID) {
+                                    androidx.recyclerview.widget.GridLayoutManager(ctx, 3)
+                                } else {
+                                    androidx.recyclerview.widget.LinearLayoutManager(ctx)
+                                }
                                 this.adapter = adapter
                                 clipToPadding = false
                                 importantForAccessibility = android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -558,11 +577,18 @@ fun FileBrowserScreen(
                                 addOnScrollListener(object : androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
                                     override fun onScrollStateChanged(rv: androidx.recyclerview.widget.RecyclerView, newState: Int) {
                                         if (newState == androidx.recyclerview.widget.RecyclerView.SCROLL_STATE_IDLE) {
-                                            val lm = rv.layoutManager as? androidx.recyclerview.widget.LinearLayoutManager
-                                            lm?.let {
-                                                val pos = it.findFirstVisibleItemPosition()
-                                                val offset = it.findViewByPosition(pos)?.top ?: 0
-                                                viewModel.saveScrollPosition(pos, offset)
+                                            val lm = rv.layoutManager
+                                            when (lm) {
+                                                is androidx.recyclerview.widget.LinearLayoutManager -> {
+                                                    val pos = lm.findFirstVisibleItemPosition()
+                                                    val offset = lm.findViewByPosition(pos)?.top ?: 0
+                                                    viewModel.saveScrollPosition(pos, offset)
+                                                }
+                                                is androidx.recyclerview.widget.GridLayoutManager -> {
+                                                    val pos = lm.findFirstVisibleItemPosition()
+                                                    val offset = lm.findViewByPosition(pos)?.top ?: 0
+                                                    viewModel.saveScrollPosition(pos, offset)
+                                                }
                                             }
                                         }
                                     }
@@ -570,7 +596,16 @@ fun FileBrowserScreen(
                             }
                         },
                         update = { rv ->
-                            // 每次列表更新后恢复滚动位置
+                            // 切换 LayoutManager
+                            val targetLM = if (state.viewMode == ViewMode.GRID) {
+                                androidx.recyclerview.widget.GridLayoutManager(rv.context, 3)
+                            } else {
+                                androidx.recyclerview.widget.LinearLayoutManager(rv.context)
+                            }
+                            if (rv.layoutManager?.javaClass != targetLM.javaClass) {
+                                rv.layoutManager = targetLM
+                            }
+                            // 恢复滚动位置
                             rv.post {
                                 val (index, offset) = viewModel.getSavedScrollPosition()
                                 if (index > 0 || offset > 0) {
