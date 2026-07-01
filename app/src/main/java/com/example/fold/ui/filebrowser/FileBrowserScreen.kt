@@ -68,6 +68,7 @@ fun FileBrowserScreen(
     onArchiveClick: (String) -> Unit,
     onVideoClick: (String) -> Unit = {},
     onAudioClick: (String) -> Unit = {},
+    onTextEditorClick: (String) -> Unit = {},
     onNavigateToHiddenApps: () -> Unit = {},
     onNavigateToTrash: () -> Unit = {},
     viewModel: FileBrowserViewModel = viewModel()
@@ -116,6 +117,11 @@ fun FileBrowserScreen(
     LaunchedEffect(Unit) {
         FoldLogger.i(TAG, "FileBrowserScreen: composed, path=${state.currentPath}, files=${files.size}")
         com.example.fold.util.ShizukuHelper.recheck()
+    }
+
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+        FoldLogger.d(TAG, "FileBrowserScreen: ON_RESUME, refreshing")
+        viewModel.onResume()
     }
 
     LaunchedEffect(files.isNotEmpty()) {
@@ -310,12 +316,23 @@ fun FileBrowserScreen(
                                     shape = RoundedCornerShape(16.dp)
                                 ) {
                                     DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.action_new_folder)) },
+                                        onClick = { showMoreMenu = false; viewModel.showNewFolderDialog() },
+                                        leadingIcon = { Icon(Icons.Filled.CreateNewFolder, contentDescription = null) }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.action_new_txt)) },
+                                        onClick = { showMoreMenu = false; viewModel.showNewTxtDialog() },
+                                        leadingIcon = { Icon(Icons.Filled.NoteAdd, contentDescription = null) }
+                                    )
+                                    HorizontalDivider()
+                                    DropdownMenuItem(
                                         text = { Text(stringResource(R.string.sort_title)) },
                                         onClick = { showMoreMenu = false; viewModel.showSortDialog() },
                                         leadingIcon = { Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = null) }
                                     )
                                     DropdownMenuItem(
-                                        text = { Text(if (state.viewMode == ViewMode.GRID) "列表视图" else "宫格视图") },
+                                        text = { Text(stringResource(if (state.viewMode == ViewMode.GRID) R.string.view_mode_list else R.string.view_mode_grid)) },
                                         onClick = { showMoreMenu = false; viewModel.toggleViewMode() },
                                         leadingIcon = {
                                             Icon(
@@ -424,7 +441,7 @@ fun FileBrowserScreen(
                             if (com.example.fold.util.ShizukuHelper.available.value) {
                                 com.example.fold.util.ShizukuHelper.requestPermission()
                             } else {
-                                Toast.makeText(context, "请先启动 Shizuku，然后切回此应用", Toast.LENGTH_LONG).show()
+                                Toast.makeText(context, context.getString(R.string.shizuku_please_start), Toast.LENGTH_LONG).show()
                             }
                         }
                     ) {
@@ -504,7 +521,7 @@ fun FileBrowserScreen(
                                             }
                                             context.startActivity(intent)
                                         } catch (e: Exception) {
-                                            Toast.makeText(context, "无法安装: ${e.message}", Toast.LENGTH_SHORT).show()
+                                            Toast.makeText(context, context.getString(R.string.install_failed, e.message ?: ""), Toast.LENGTH_SHORT).show()
                                         }
                                     }
                                     else -> {
@@ -622,6 +639,62 @@ fun FileBrowserScreen(
             // 重命名对话框
             state.renamingFile?.let { file ->
                 RenameDialog(currentName = file.name, onConfirm = { viewModel.confirmRename(it) }, onDismiss = { viewModel.cancelRename() })
+            }
+
+            // 新建文件夹对话框
+            if (state.showNewFolderDialog) {
+                var folderName by remember { mutableStateOf("") }
+                AlertDialog(
+                    onDismissRequest = { viewModel.hideNewFolderDialog() },
+                    title = { Text(stringResource(R.string.new_folder_title), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) },
+                    text = {
+                        OutlinedTextField(
+                            value = folderName,
+                            onValueChange = { folderName = it },
+                            placeholder = { Text(stringResource(R.string.new_folder_hint)) },
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    },
+                    confirmButton = {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            TextButton(onClick = { viewModel.hideNewFolderDialog() }) { Text(stringResource(R.string.action_cancel)) }
+                            TextButton(onClick = { if (folderName.isNotBlank()) viewModel.createFolder(folderName.trim()) },
+                                enabled = folderName.isNotBlank()) { Text(stringResource(R.string.action_confirm)) }
+                        }
+                    },
+                    dismissButton = {},
+                    shape = RoundedCornerShape(16.dp)
+                )
+            }
+
+            // 新建文本对话框
+            if (state.showNewTxtDialog) {
+                var txtName by remember { mutableStateOf("") }
+                AlertDialog(
+                    onDismissRequest = { viewModel.hideNewTxtDialog() },
+                    title = { Text(stringResource(R.string.action_new_txt), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) },
+                    text = {
+                        OutlinedTextField(
+                            value = txtName,
+                            onValueChange = { txtName = it },
+                            placeholder = { Text(stringResource(R.string.file_name_hint)) },
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    },
+                    confirmButton = {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            TextButton(onClick = { viewModel.hideNewTxtDialog() }) { Text(stringResource(R.string.action_cancel)) }
+                            TextButton(onClick = { if (txtName.isNotBlank()) viewModel.createNewTxt(txtName.trim()) },
+                                enabled = txtName.isNotBlank()) { Text(stringResource(R.string.action_confirm)) }
+                        }
+                    },
+                    dismissButton = {},
+                    shape = RoundedCornerShape(16.dp)
+                )
             }
 
             // 排序对话框
@@ -815,6 +888,9 @@ fun FileBrowserScreen(
                             }
                             items.add(MenuItem(stringResource(R.string.action_compress), Icons.Filled.Archive) { menuTargetFile = null; compressTargetFile = file })
                             items.add(MenuItem(stringResource(R.string.action_properties), Icons.Filled.Info) { menuTargetFile = null; viewModel.showProperties(file) })
+                            if (file.isTextEditable) {
+                                items.add(MenuItem(stringResource(R.string.action_edit), Icons.Filled.Description) { menuTargetFile = null; onTextEditorClick(file.path) })
+                            }
                             items.add(MenuItem(stringResource(R.string.action_delete), Icons.Filled.Delete) { menuTargetFile = null; viewModel.deleteFile(file) })
 
                             val rows = items.chunked(2)

@@ -62,7 +62,7 @@ class MusicNotificationService : Service() {
         // 占位通知，立即启动前台
         val placeholder = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("音乐播放")
+            .setContentTitle(getString(R.string.player_music_play))
             .setOngoing(true)
             .setSilent(true)
             .build()
@@ -111,8 +111,8 @@ class MusicNotificationService : Service() {
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             notifManager.createNotificationChannel(
-                NotificationChannel(CHANNEL, "音乐播放", NotificationManager.IMPORTANCE_LOW).apply {
-                    description = "音乐播放控制"
+                NotificationChannel(CHANNEL, getString(R.string.player_music_play), NotificationManager.IMPORTANCE_LOW).apply {
+                    description = getString(R.string.player_music_control)
                     setShowBadge(false)
                 }
             )
@@ -204,7 +204,7 @@ class MusicNotificationService : Service() {
         // 播放控制按钮
         builder.addAction(
             NotificationCompat.Action(
-                android.R.drawable.ic_media_previous, "上一首",
+                android.R.drawable.ic_media_previous, getString(R.string.player_prev),
                 PendingIntent.getBroadcast(this, 201,
                     Intent("com.example.fold.MUSIC_PREV"),
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
@@ -214,7 +214,7 @@ class MusicNotificationService : Service() {
         if (isPlaying) {
             builder.addAction(
                 NotificationCompat.Action(
-                    android.R.drawable.ic_media_pause, "暂停",
+                    android.R.drawable.ic_media_pause, getString(R.string.player_pause),
                     PendingIntent.getBroadcast(this, 202,
                         Intent("com.example.fold.MUSIC_PAUSE"),
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
@@ -223,7 +223,7 @@ class MusicNotificationService : Service() {
         } else {
             builder.addAction(
                 NotificationCompat.Action(
-                    android.R.drawable.ic_media_play, "播放",
+                    android.R.drawable.ic_media_play, getString(R.string.player_play),
                     PendingIntent.getBroadcast(this, 203,
                         Intent("com.example.fold.MUSIC_RESUME"),
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
@@ -233,7 +233,7 @@ class MusicNotificationService : Service() {
 
         builder.addAction(
             NotificationCompat.Action(
-                android.R.drawable.ic_media_next, "下一首",
+                android.R.drawable.ic_media_next, getString(R.string.player_next),
                 PendingIntent.getBroadcast(this, 204,
                     Intent("com.example.fold.MUSIC_NEXT"),
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)

@@ -73,7 +73,7 @@ fun ArchiveViewerScreen(
         if (result != null) {
             entries = result
         } else {
-            error = "无法读取压缩包内容"
+            error = context.getString(R.string.archive_read_failed)
         }
         isLoading = false
     }
@@ -91,7 +91,7 @@ fun ArchiveViewerScreen(
                         )
                         if (entries.isNotEmpty()) {
                             Text(
-                                text = "${entries.size} 项 · ${formatFileSize(file.length())}",
+                                text = "${stringResource(R.string.archive_entry_count, entries.size)} · ${formatFileSize(file.length())}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

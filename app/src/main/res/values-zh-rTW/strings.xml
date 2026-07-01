@@ -156,4 +156,163 @@
     <string name="usb_rescan">重新掃描</string>
     <string name="usb_disable_exclusive">關閉獨佔</string>
     <string name="usb_enable_exclusive">啟用獨佔</string>
+
+    <!-- 通用 -->
+    <string name="delete_failed">刪除失敗: %1$s</string>
+    <string name="permission_denied_hint">儲存權限未授權，請前往設定開啟「所有檔案存取」權限</string>
+    <string name="action_rename">重新命名</string>
+    <string name="action_copy">複製</string>
+    <string name="action_move">移動</string>
+    <string name="action_copy_path">複製路徑</string>
+    <string name="action_paste_here">貼上到此處</string>
+    <string name="action_move_here">移動到此處</string>
+    <string name="action_share">分享</string>
+    <string name="action_properties">屬性</string>
+    <string name="action_confirm">確定</string>
+
+    <!-- 退出確認 -->
+    <string name="press_again_to_exit">再按一次退出程式</string>
+
+    <!-- 閱讀器 -->
+    <string name="reader_bookmark_saved">書籤已儲存</string>
+    <string name="reader_bookmark_loaded">已跳轉到書籤位置</string>
+    <string name="reader_bookmark_not_found">暫無書籤記錄</string>
+    <string name="reader_bookmarks">書籤</string>
+    <string name="reader_volume_page_turn">音量鍵翻頁</string>
+    <string name="reader_stealth_mode">息屏歸隱</string>
+    <string name="reader_load_failed">載入失敗</string>
+    <string name="reader_reading">閱讀中</string>
+    <string name="reader_tts_reading">朗讀中</string>
+    <string name="reader_file_not_found">檔案不存在: %1$s</string>
+
+    <!-- 新資料夾 / 新文字 -->
+    <string name="action_new_folder">新增資料夾</string>
+    <string name="action_new_txt">新增文字</string>
+    <string name="new_folder_title">新增資料夾</string>
+    <string name="new_folder_hint">資料夾名稱</string>
+    <string name="new_folder_created">資料夾已建立</string>
+    <string name="new_folder_failed">建立失敗: %1$s</string>
+
+    <!-- 壓縮 -->
+    <string name="action_compress">壓縮</string>
+    <string name="action_compress_targz">壓縮為 TAR.GZ</string>
+    <string name="action_compress_7z">壓縮為 7Z</string>
+    <string name="compress_format_title">選擇壓縮格式</string>
+
+    <!-- 檢視模式 -->
+    <string name="view_mode_list">列表檢視</string>
+    <string name="view_mode_grid">格線檢視</string>
+
+    <!-- Shizuku -->
+    <string name="shizuku_please_start">請先啟動 Shizuku，然後切回此應用</string>
+    <string name="shizuku_not_connected">Shizuku 服務未連線</string>
+
+    <!-- 安裝 -->
+    <string name="install_failed">無法安裝: %1$s</string>
+
+    <!-- 檔案名稱 -->
+    <string name="file_name_hint">檔案名稱</string>
+
+    <!-- 編輯器 -->
+    <string name="editor_unsaved_confirm">檔案已修改，是否儲存？</string>
+    <string name="editor_save">儲存</string>
+    <string name="editor_font_size">字號大小</string>
+    <string name="editor_confirm">確定</string>
+    <string name="editor_save_failed">儲存失敗: %1$s</string>
+
+    <!-- 播放器 -->
+    <string name="player_usb_stream_failed">USB 串流建立失敗</string>
+    <string name="player_pause">暫停</string>
+    <string name="player_play">播放</string>
+    <string name="player_close">關閉</string>
+    <string name="player_fullscreen">全螢幕</string>
+    <string name="player_back">返回</string>
+    <string name="player_prev">上一首</string>
+    <string name="player_next">下一首</string>
+    <string name="player_music_play">音樂播放</string>
+    <string name="player_music_control">音樂播放控制</string>
+
+    <!-- TTS 通知 -->
+    <string name="tts_channel_name">朗讀控制</string>
+    <string name="tts_channel_desc">TTS 朗讀播放控制</string>
+    <string name="tts_progress_channel">閱讀進度</string>
+    <string name="tts_progress_desc">目前閱讀進度</string>
+    <string name="tts_prev">上一段</string>
+    <string name="tts_next">下一段</string>
+    <string name="tts_continue">繼續</string>
+
+    <!-- 壓縮檔 -->
+    <string name="archive_read_failed">無法讀取壓縮檔內容</string>
+    <string name="archive_entry_count">%1$d 項</string>
+
+    <!-- 儲存 -->
+    <string name="storage_internal">內部儲存</string>
+    <string name="storage_sdcard">SD卡</string>
+    <string name="storage_external">外部儲存</string>
+    <string name="storage_readonly">儲存裝置唯讀，無法刪除</string>
+
+    <!-- 操作結果 -->
+    <string name="result_extract_failed">解壓失敗: %1$s</string>
+    <string name="result_copy_done">已完成 %1$d/%2$d 個檔案</string>
+    <string name="result_compress_failed">壓縮失敗: %1$s</string>
+    <string name="result_create_failed">建立失敗</string>
+    <string name="result_file_exists">檔案已存在</string>
+    <string name="result_delete_done">已刪除 %1$d/%2$d 個檔案</string>
+    <string name="result_file_count">%1$d 個檔案</string>
+
+    <!-- 屬性 -->
+    <string name="prop_name">名稱</string>
+    <string name="prop_path">路徑</string>
+    <string name="prop_size">大小</string>
+    <string name="prop_type">類型</string>
+    <string name="prop_modified">修改時間</string>
+    <string name="prop_md5">MD5</string>
+    <string name="prop_calculating">計算中…</string>
+
+    <!-- 搜尋 -->
+    <string name="search_files">搜尋檔案…</string>
+
+    <!-- 多選 -->
+    <string name="action_select">選擇</string>
+    <string name="select_all">全選</string>
+    <string name="selected_count">已選擇 %1$d 項</string>
+
+    <!-- 回收站 -->
+    <string name="trash_title">回收站</string>
+    <string name="trash_empty">回收站為空</string>
+    <string name="trash_count">共 %1$d 個檔案</string>
+    <string name="trash_restore">還原</string>
+    <string name="trash_delete_permanently">永久刪除</string>
+    <string name="trash_empty_all">清空回收站</string>
+
+    <!-- 閱讀主題 -->
+    <string name="theme_light">明亮</string>
+    <string name="theme_dark">暗黑</string>
+    <string name="theme_sepia">羊皮紙</string>
+    <string name="theme_green">護眼綠</string>
+    <string name="theme_gray">雅灰</string>
+    <string name="theme_ink">墨水</string>
+
+    <!-- 均衡器 -->
+    <string name="eq_title">均衡器</string>
+    <string name="eq_enabled">均衡器</string>
+    <string name="eq_bass">低音</string>
+    <string name="eq_treble">高音</string>
+    <string name="eq_bands">頻段</string>
+    <string name="eq_custom">自訂</string>
+    <string name="eq_reset">重設</string>
+    <string name="eq_test">測試</string>
+    <string name="eq_preset_title">選擇預設</string>
+    <string name="eq_preset_flat">平直</string>
+    <string name="eq_preset_bass_boost">低音增強</string>
+    <string name="eq_preset_treble_boost">高音增強</string>
+    <string name="eq_preset_vocal">人聲</string>
+    <string name="eq_preset_rock">搖滾</string>
+    <string name="eq_preset_pop">流行</string>
+    <string name="eq_preset_jazz">爵士</string>
+    <string name="eq_preset_classical">古典</string>
+    <string name="eq_preset_electronic">電子</string>
+    <string name="eq_status_active">均衡器已生效</string>
+    <string name="eq_status_inactive">均衡器已關閉</string>
+    <string name="eq_current_preset">目前預設: %1$s</string>
 </resources>

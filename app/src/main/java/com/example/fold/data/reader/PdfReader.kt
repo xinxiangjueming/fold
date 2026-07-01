@@ -7,6 +7,7 @@ import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import com.example.fold.util.FoldLogger
 import com.example.fold.AppContainer
+import com.example.fold.R
 import com.example.fold.data.model.Chapter
 import com.example.fold.data.model.ReaderState
 import kotlinx.coroutines.Dispatchers
@@ -42,7 +43,7 @@ class PdfReader : ContentReader {
             val file = File(filePath)
             if (!file.exists()) {
                 FoldLogger.e(TAG, "open: file not found: $filePath")
-                _state.value = _state.value.copy(isLoading = false, error = "文件不存在: ${file.name}")
+                _state.value = _state.value.copy(isLoading = false, error = context.getString(R.string.reader_file_not_found, file.name))
                 return@withContext
             }
             FoldLogger.d(TAG, "open: fileSize=${file.length()} bytes")

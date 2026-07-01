@@ -101,12 +101,17 @@ class FileListAdapter(
                 iconBackground.visibility = View.GONE
                 icon.visibility = View.GONE
                 thumbnail.visibility = View.VISIBLE
-                val bgDrawable = GradientDrawable().apply {
-                    shape = GradientDrawable.RECTANGLE
-                    cornerRadius = 12f * itemView.context.resources.displayMetrics.density
-                    setColor(if (isDark) 0xFF2A2A2A.toInt() else 0xFFF5F5F5.toInt())
+                val isApk = file.extension.equals("apk", ignoreCase = true)
+                if (!isApk) {
+                    val bgDrawable = GradientDrawable().apply {
+                        shape = GradientDrawable.RECTANGLE
+                        cornerRadius = 12f * itemView.context.resources.displayMetrics.density
+                        setColor(if (isDark) 0xFF2A2A2A.toInt() else 0xFFF5F5F5.toInt())
+                    }
+                    thumbnail.background = bgDrawable
+                } else {
+                    thumbnail.background = null
                 }
-                thumbnail.background = bgDrawable
                 ThumbnailLoader.loadThumbnail(thumbnail, File(file.path), isDark)
             } else {
                 iconBackground.visibility = View.VISIBLE
@@ -182,13 +187,18 @@ class FileListAdapter(
                 iconBackground.visibility = View.GONE
                 icon.visibility = View.GONE
                 thumbnail.visibility = View.VISIBLE
-                val bgDrawable = GradientDrawable().apply {
-                    shape = GradientDrawable.RECTANGLE
-                    cornerRadius = 8f * itemView.context.resources.displayMetrics.density
-                    setColor(if (isDark) 0xFF2A2A2A.toInt() else 0xFFF5F5F5.toInt())
+                val isApk = file.extension.equals("apk", ignoreCase = true)
+                if (!isApk) {
+                    val bgDrawable = GradientDrawable().apply {
+                        shape = GradientDrawable.RECTANGLE
+                        cornerRadius = 8f * itemView.context.resources.displayMetrics.density
+                        setColor(if (isDark) 0xFF2A2A2A.toInt() else 0xFFF5F5F5.toInt())
+                    }
+                    thumbnail.background = bgDrawable
+                } else {
+                    thumbnail.background = null
                 }
-                thumbnail.background = bgDrawable
-                ThumbnailLoader.loadThumbnail(thumbnail, File(file.path), isDark)
+                ThumbnailLoader.loadThumbnail(thumbnail, File(file.path), isDark, apkIconScale = 0.8f)
             } else {
                 iconBackground.visibility = View.VISIBLE
                 icon.visibility = View.VISIBLE

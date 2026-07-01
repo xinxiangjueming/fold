@@ -37,6 +37,9 @@ class MainActivity : AppCompatActivity() {
         /** 息屏归隐：等待 onResume 时导航到计算器 */
         @Volatile
         var pendingStealthNavigate = false
+        /** 息屏归隐：强制首帧为计算器（onCreate 中设置，NavGraph 读取后清除） */
+        @Volatile
+        var forceStealthStart = false
         /** Activity 重建时恢复的路由 */
         var pendingRestoreRoute = androidx.compose.runtime.mutableStateOf<String?>(null)
         /** 当前导航路由（由 NavGraph 更新） */
@@ -72,6 +75,16 @@ class MainActivity : AppCompatActivity() {
         val t2 = SystemClock.elapsedRealtime()
         FoldLogger.i(TAG, "onCreate: theme setup=${t2-t1}ms")
 
+        // 息屏归隐：首帧直接是计算器，不能恢复旧导航栈
+        val isStealthResume = pendingStealthNavigate
+        if (isStealthResume) {
+            pendingStealthNavigate = false
+            forceStealthStart = true
+            savedInstanceState?.remove("android:support:navigation:nav_graph:navControllerState")
+            getSharedPreferences("nav_state", MODE_PRIVATE).edit().remove("current_route").apply()
+            FoldLogger.i(TAG, "onCreate: stealth mode, cleared saved navigation state")
+        }
+
         // 沉浸式系统栏全部在 FoldTheme 的 SideEffect 中处理
         setContent {
             FoldTheme {
@@ -105,11 +118,14 @@ class MainActivity : AppCompatActivity() {
         updateActivityIntent(this, isCalcMode)
 
         // Activity 重建时恢复路由（从 savedInstanceState 或 SharedPreferences）
-        val savedRoute = savedInstanceState?.getString("current_route")
-            ?: getSharedPreferences("nav_state", MODE_PRIVATE).getString("current_route", null)
-        if (savedRoute != null && savedRoute !in listOf("file_browser", "calculator")) {
-            FoldLogger.i(TAG, "onCreate: restoring route=$savedRoute")
-            pendingRestoreRoute.value = savedRoute
+        // 息屏归隐时跳过，避免闪现真实页面
+        if (!isStealthResume) {
+            val savedRoute = savedInstanceState?.getString("current_route")
+                ?: getSharedPreferences("nav_state", MODE_PRIVATE).getString("current_route", null)
+            if (savedRoute != null && savedRoute !in listOf("file_browser", "calculator")) {
+                FoldLogger.i(TAG, "onCreate: restoring route=$savedRoute")
+                pendingRestoreRoute.value = savedRoute
+            }
         }
     }
 

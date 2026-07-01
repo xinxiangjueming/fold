@@ -109,7 +109,7 @@ private fun injectFullscreenButton(
         val settingsIndex = parent.indexOfChild(settingsView)
 
         // 全屏按钮
-        val fsBtn = createControlButton(playerView, R.drawable.ic_fullscreen, "全屏").apply {
+        val fsBtn = createControlButton(playerView, R.drawable.ic_fullscreen, playerView.context.getString(R.string.player_fullscreen)).apply {
             tag = false // isFullscreen state
             setOnClickListener {
                 val fs = !(tag as? Boolean ?: false)
@@ -123,7 +123,7 @@ private fun injectFullscreenButton(
         parent.addView(fsBtn, settingsIndex) // 插入到设置按钮左边
 
         // 返回按钮 — 找到控制器最左侧的容器
-        val backBtn = createControlButton(playerView, android.R.drawable.ic_menu_revert, "返回").apply {
+        val backBtn = createControlButton(playerView, android.R.drawable.ic_menu_revert, playerView.context.getString(R.string.player_back)).apply {
             setOnClickListener { onBack() }
         }
         // 插入到控制器顶部容器的最前面

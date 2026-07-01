@@ -25,8 +25,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.fold.R
 
 /**
  * 悬浮小窗播放器 — 显示在文件浏览器右下角
@@ -94,7 +96,7 @@ fun MiniPlayerFloatingWidget(
                 ) {
                     Icon(
                         if (miniState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = if (miniState.isPlaying) "暂停" else "播放",
+                        contentDescription = if (miniState.isPlaying) stringResource(R.string.player_pause) else stringResource(R.string.player_play),
                         tint = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.size(22.dp)
                     )
@@ -107,7 +109,7 @@ fun MiniPlayerFloatingWidget(
                 ) {
                     Icon(
                         Icons.Default.Close,
-                        contentDescription = "关闭",
+                        contentDescription = stringResource(R.string.player_close),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(18.dp)
                     )

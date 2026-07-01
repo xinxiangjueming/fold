@@ -5,6 +5,8 @@ import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.IBinder
 import android.util.Log
+import com.example.fold.AppContainer
+import com.example.fold.R
 import com.example.fold.shizuku.IShellService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -179,7 +181,7 @@ object ShizukuHelper {
         val svc = shellService
         if (svc == null) {
             Log.e(TAG, "exec: service null, bound=${_serviceBound.value}")
-            return@withContext Result.failure(Exception("Shizuku 服务未连接"))
+            return@withContext Result.failure(Exception(AppContainer.appContext.getString(R.string.shizuku_not_connected)))
         }
         try {
             Log.d(TAG, "exec: $command")
@@ -197,14 +199,18 @@ object ShizukuHelper {
         }
     }
 
+    private fun sanitizePath(path: String): String {
+        return path.replace("'", "'\\''")
+    }
+
     suspend fun listRestrictedDir(path: String): Result<List<RestrictedFileInfo>> {
         Log.d(TAG, "listRestrictedDir: $path")
-        // 优先用 stat（toybox 内置，输出格式稳定），回退到 ls -la
-        val output = exec("stat -c '%A %s %n' '$path/*' 2>/dev/null").getOrNull()
+        val safePath = sanitizePath(path)
+        val output = exec("stat -c '%A %s %n' '$safePath/*' 2>/dev/null").getOrNull()
         val lines = if (!output.isNullOrBlank()) {
             output.lines().filter { it.isNotBlank() }
         } else {
-            exec("ls -la '$path'").getOrNull()?.lines()
+            exec("ls -la '$safePath'").getOrNull()?.lines()
                 ?.filter { it.isNotBlank() && !it.startsWith("total") }
                 ?: emptyList()
         }
@@ -217,13 +223,13 @@ object ShizukuHelper {
 
     suspend fun deleteRestricted(path: String): Result<Unit> {
         Log.d(TAG, "deleteRestricted: path=$path")
-        return exec("rm -rf '$path'").map { }
+        return exec("rm -rf '${sanitizePath(path)}'").map { }
     }
 
     suspend fun renameRestricted(oldPath: String, newName: String): Result<Unit> {
         val parent = oldPath.substringBeforeLast('/')
         Log.d(TAG, "renameRestricted: oldPath=$oldPath, newName=$newName")
-        return exec("mv '$oldPath' '$parent/$newName'").map { }
+        return exec("mv '${sanitizePath(oldPath)}' '${sanitizePath(parent)}/${sanitizePath(newName)}'").map { }
     }
 
     fun needsShizuku(path: String): Boolean {

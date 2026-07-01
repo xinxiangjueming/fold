@@ -4,6 +4,9 @@ import android.app.Application
 import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.FileObserver
+import android.os.Handler
+import android.os.Looper
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.fold.AppContainer
@@ -86,6 +89,10 @@ data class FileBrowserState(
     val storageVolumes: List<StorageVolume> = emptyList(),
     // 视图模式
     val viewMode: ViewMode = ViewMode.LIST,
+    // 新建文件夹
+    val showNewFolderDialog: Boolean = false,
+    // 新建文本
+    val showNewTxtDialog: Boolean = false,
 )
 
 data class StorageVolume(
@@ -124,6 +131,19 @@ class FileBrowserViewModel : ViewModel() {
     // 计算器伪装模式（小爱老师等学习机）
     private val _calculatorMode = MutableStateFlow(prefs.getBoolean("calculator_mode", false))
     val calculatorMode: StateFlow<Boolean> = _calculatorMode.asStateFlow()
+
+    // FileObserver：监听当前目录外部变化（MTP/ADB/其他App写入）
+    private var fileObserver: FileObserver? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+    @Volatile private var isObserverRefresh = false
+    private val refreshRunnable = Runnable {
+        FoldLogger.i(TAG, "FileObserver: debounced refresh triggered")
+        isObserverRefresh = true
+        val path = _state.value.currentPath
+        localFileProvider.invalidateCache(path)
+        navigateTo(path)
+    }
+    private var observerEventCount = 0
 
     /** 切换伪装后回调（用于更新 Activity intent） */
     var onCalculatorModeChanged: ((Boolean) -> Unit)? = null
@@ -234,7 +254,7 @@ class FileBrowserViewModel : ViewModel() {
         val volumes = mutableListOf<StorageVolume>()
         try {
             // 内部存储
-            volumes.add(StorageVolume("内部存储", "/storage/emulated/0", false))
+            volumes.add(StorageVolume(app.getString(R.string.storage_internal), "/storage/emulated/0", false))
             // 检测外部存储
             val sm = app.getSystemService(Context.STORAGE_SERVICE) as android.os.storage.StorageManager
             for (volume in sm.storageVolumes) {
@@ -244,8 +264,8 @@ class FileBrowserViewModel : ViewModel() {
                 val isReadOnly = volume.state == "mounted_ro"
                 val name = when {
                     path.contains("usb") || path.contains("otg") -> "OTG"
-                    path.contains("sdcard1") || path.contains("ext_sd") -> "SD卡"
-                    isRemovable -> "外部存储"
+                    path.contains("sdcard1") || path.contains("ext_sd") -> app.getString(R.string.storage_sdcard)
+                    isRemovable -> app.getString(R.string.storage_external)
                     else -> continue
                 }
                 volumes.add(StorageVolume(name, path, isRemovable, isReadOnly))
@@ -257,10 +277,67 @@ class FileBrowserViewModel : ViewModel() {
         _state.update { it.copy(storageVolumes = volumes) }
     }
 
+    private fun startObserver(path: String) {
+        stopObserver()
+        if (ShizukuHelper.needsShizuku(path)) return
+        val dir = File(path)
+        if (!dir.exists() || !dir.isDirectory) return
+
+        val mask = FileObserver.CREATE or
+            FileObserver.DELETE or
+            FileObserver.MODIFY or
+            FileObserver.MOVED_FROM or
+            FileObserver.MOVED_TO or
+            FileObserver.CLOSE_WRITE or
+            FileObserver.ATTRIB
+
+        fileObserver = object : FileObserver(dir, mask) {
+            override fun onEvent(event: Int, eventPath: String?) {
+                if (isObserverRefresh) return
+                val name = eventPath ?: return
+                if (name == "fold.log") return
+                val eName = event and 0xFFF
+                FoldLogger.d(TAG, "FileObserver: event=$eName path=$name")
+                observerEventCount++
+                mainHandler.removeCallbacks(refreshRunnable)
+                mainHandler.postDelayed(refreshRunnable, 200)
+            }
+        }
+        try {
+            fileObserver?.startWatching()
+            FoldLogger.i(TAG, "FileObserver: started for $path")
+        } catch (e: Exception) {
+            FoldLogger.e(TAG, "FileObserver: startWatching failed", e)
+            fileObserver = null
+        }
+    }
+
+    private fun stopObserver() {
+        mainHandler.removeCallbacks(refreshRunnable)
+        try {
+            fileObserver?.stopWatching()
+        } catch (_: Exception) {}
+        fileObserver = null
+    }
+
+    fun onResume() {
+        val path = _state.value.currentPath
+        if (path.isNotEmpty()) {
+            localFileProvider.invalidateCache(path)
+            navigateTo(path)
+        }
+    }
+
     fun navigateTo(path: String) {
         FoldLogger.d(TAG, "navigateTo: path=$path")
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true, error = null) }
+            // 同一目录刷新时保留现有列表，不显示 loading，避免整页闪烁
+            val isRefresh = path == _state.value.currentPath && _files.value.isNotEmpty()
+            if (!isRefresh) {
+                _state.update { it.copy(isLoading = true, error = null) }
+            } else {
+                _state.update { it.copy(error = null) }
+            }
             try {
                 val t0 = System.nanoTime()
                 val isRestricted = ShizukuHelper.needsShizuku(path)
@@ -323,6 +400,11 @@ class FileBrowserViewModel : ViewModel() {
                 }
                 val t6 = System.nanoTime()
                 FoldLogger.d(TAG, "navigateTo: success, path=$path, files=${sorted.size}, stateUpdate=${(t6 - t5) / 1_000_000}ms, total=${(t6 - t0) / 1_000_000}ms")
+                if (isObserverRefresh) {
+                    isObserverRefresh = false
+                } else {
+                    startObserver(path)
+                }
             } catch (e: Exception) {
                 FoldLogger.e(TAG, "navigateTo: failed, path=$path", e)
                 _state.update { it.copy(isLoading = false, error = e.message) }
@@ -362,7 +444,7 @@ class FileBrowserViewModel : ViewModel() {
                 if (!canWrite) {
                     FoldLogger.w(TAG, "deleteFile: path not writable")
                     withContext(Dispatchers.Main) {
-                        _state.update { it.copy(error = "存储设备只读，无法删除") }
+                        _state.update { it.copy(error = app.getString(R.string.storage_readonly)) }
                     }
                     return@launch
                 }
@@ -479,7 +561,7 @@ class FileBrowserViewModel : ViewModel() {
                 refresh()
             } else {
                 FoldLogger.e(TAG, "extractArchive: failed", result.exceptionOrNull())
-                _state.update { it.copy(error = "解压失败: ${result.exceptionOrNull()?.message}") }
+                _state.update { it.copy(error = app.getString(R.string.result_extract_failed, result.exceptionOrNull()?.message ?: "")) }
             }
         }
     }
@@ -521,7 +603,7 @@ class FileBrowserViewModel : ViewModel() {
             withContext(Dispatchers.Main) { refresh() }
             _state.update { it.copy(clipboardFiles = emptyList(), clipboardMove = false) }
             if (successCount < clips.size) {
-                _state.update { it.copy(error = "已完成 $successCount/${clips.size} 个文件") }
+                _state.update { it.copy(error = app.getString(R.string.result_copy_done, successCount, clips.size)) }
             }
         }
     }
@@ -567,7 +649,7 @@ class FileBrowserViewModel : ViewModel() {
                     refresh()
                 } else if (result.exceptionOrNull() !is kotlinx.coroutines.CancellationException) {
                     FoldLogger.e(TAG, "compressArchive: failed", result.exceptionOrNull())
-                    _state.update { it.copy(error = "压缩失败: ${result.exceptionOrNull()?.message}") }
+                    _state.update { it.copy(error = app.getString(R.string.result_compress_failed, result.exceptionOrNull()?.message ?: "")) }
                 }
             } finally {
                 compressJob = null
@@ -592,6 +674,79 @@ class FileBrowserViewModel : ViewModel() {
         FoldLogger.d(TAG, "refresh: path=$path")
         localFileProvider.invalidateCache(path)
         navigateTo(path)
+    }
+
+    fun showNewFolderDialog() {
+        _state.update { it.copy(showNewFolderDialog = true) }
+    }
+
+    fun hideNewFolderDialog() {
+        _state.update { it.copy(showNewFolderDialog = false) }
+    }
+
+    fun createFolder(name: String) {
+        FoldLogger.i(TAG, "createFolder: name=$name")
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val dir = File(_state.value.currentPath, name)
+                val created = if (ShizukuHelper.needsShizuku(dir.parent) && ShizukuHelper.granted.value) {
+                    ShizukuHelper.exec("mkdir -p '${dir.absolutePath.replace("'", "'\\''")}'").isSuccess
+                } else {
+                    dir.mkdirs()
+                }
+                if (created) {
+                    localFileProvider.invalidateCache(_state.value.currentPath)
+                    withContext(Dispatchers.Main) {
+                        _state.update { it.copy(showNewFolderDialog = false) }
+                        refresh()
+                    }
+                } else {
+                    withContext(Dispatchers.Main) {
+                        _state.update { it.copy(error = app.getString(R.string.result_create_failed)) }
+                    }
+                }
+            } catch (e: Exception) {
+                FoldLogger.e(TAG, "createFolder failed", e)
+                withContext(Dispatchers.Main) {
+                    _state.update { it.copy(error = e.message) }
+                }
+            }
+        }
+    }
+
+    fun showNewTxtDialog() {
+        _state.update { it.copy(showNewTxtDialog = true) }
+    }
+
+    fun hideNewTxtDialog() {
+        _state.update { it.copy(showNewTxtDialog = false) }
+    }
+
+    fun createNewTxt(name: String) {
+        val fileName = if (name.endsWith(".txt")) name else "$name.txt"
+        FoldLogger.i(TAG, "createNewTxt: $fileName")
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val file = File(_state.value.currentPath, fileName)
+                if (file.exists()) {
+                    withContext(Dispatchers.Main) {
+                        _state.update { it.copy(error = app.getString(R.string.result_file_exists)) }
+                    }
+                    return@launch
+                }
+                file.writeText("")
+                localFileProvider.invalidateCache(_state.value.currentPath)
+                withContext(Dispatchers.Main) {
+                    _state.update { it.copy(showNewTxtDialog = false) }
+                    refresh()
+                }
+            } catch (e: Exception) {
+                FoldLogger.e(TAG, "createNewTxt failed", e)
+                withContext(Dispatchers.Main) {
+                    _state.update { it.copy(error = e.message) }
+                }
+            }
+        }
     }
 
     fun clearError() {
@@ -844,7 +999,7 @@ class FileBrowserViewModel : ViewModel() {
                 _state.update { it.copy(selectionMode = false, selectedFiles = emptySet()) }
                 refresh()
                 if (successCount < selected.size) {
-                    _state.update { it.copy(error = "已删除 $successCount/${selected.size} 个文件") }
+                    _state.update { it.copy(error = app.getString(R.string.result_delete_done, successCount, selected.size)) }
                 }
             }
         }
@@ -897,7 +1052,7 @@ class FileBrowserViewModel : ViewModel() {
         compressOutputPath = outputPath
         compressJob = viewModelScope.launch {
             FoldLogger.i(TAG, "batchCompress: ${files.size} files, format=$format")
-            _state.update { it.copy(compressProgress = 0f, compressFileName = "${files.size} 个文件") }
+            _state.update { it.copy(compressProgress = 0f, compressFileName = app.getString(R.string.result_file_count, files.size)) }
             val onProgress: (String, Int, Int) -> Unit = { name, current, total ->
                 if (!compressCancelled) {
                     val progress = if (total > 0) current.toFloat() / total else 0f
@@ -911,7 +1066,7 @@ class FileBrowserViewModel : ViewModel() {
                     refresh()
                 } else if (result.exceptionOrNull() !is kotlinx.coroutines.CancellationException) {
                     FoldLogger.e(TAG, "batchCompress: failed", result.exceptionOrNull())
-                    _state.update { it.copy(error = "压缩失败: ${result.exceptionOrNull()?.message}") }
+                    _state.update { it.copy(error = app.getString(R.string.result_compress_failed, result.exceptionOrNull()?.message ?: "")) }
                 }
             } finally {
                 compressJob = null
@@ -1030,6 +1185,7 @@ class FileBrowserViewModel : ViewModel() {
 
     override fun onCleared() {
         FoldLogger.i(TAG, "onCleared")
+        stopObserver()
         super.onCleared()
         ShizukuHelper.onServiceReady = null
         AppContainer.stopHttpServer()

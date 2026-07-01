@@ -37,6 +37,7 @@
     <string name="action_save">保存</string>
     <string name="action_update">更新</string>
     <string name="action_cancel">取消</string>
+    <string name="action_confirm">确定</string>
     <string name="action_up">返回上级</string>
 
     <!-- 退出确认 -->
@@ -120,6 +121,12 @@
     <string name="action_off">关</string>
     <string name="action_extract">解压</string>
     <string name="action_extract_all">全部解压</string>
+    <string name="action_new_folder">新建文件夹</string>
+    <string name="action_new_txt">新建文本</string>
+    <string name="new_folder_title">新建文件夹</string>
+    <string name="new_folder_hint">文件夹名称</string>
+    <string name="new_folder_created">文件夹已创建</string>
+    <string name="new_folder_failed">创建失败: %1$s</string>
     <string name="action_compress">压缩</string>
     <string name="action_compress_zip">压缩为 ZIP</string>
     <string name="action_compress_targz">压缩为 TAR.GZ</string>
@@ -227,5 +234,84 @@
     <string name="trash_restore">恢复</string>
     <string name="trash_delete_permanently">永久删除</string>
     <string name="trash_empty_all">清空回收站</string>
+
+    <!-- 视图模式 -->
+    <string name="view_mode_list">列表视图</string>
+    <string name="view_mode_grid">宫格视图</string>
+
+    <!-- Shizuku 提示 -->
+    <string name="shizuku_please_start">请先启动 Shizuku，然后切回此应用</string>
+
+    <!-- 安装 -->
+    <string name="install_failed">无法安装: %1$s</string>
+
+    <!-- 文件名 -->
+    <string name="file_name_hint">文件名</string>
+
+    <!-- 编辑器 -->
+    <string name="editor_unsaved_confirm">文件已修改，是否保存？</string>
+    <string name="editor_save">保存</string>
+    <string name="editor_font_size">字号大小</string>
+    <string name="editor_confirm">确定</string>
+    <string name="editor_save_failed">保存失败: %1$s</string>
+
+    <!-- 阅读器 -->
+    <string name="reader_load_failed">加载失败</string>
+    <string name="reader_reading">阅读中</string>
+    <string name="reader_tts_reading">朗读中</string>
+
+    <!-- 播放器 -->
+    <string name="player_usb_stream_failed">USB 流创建失败</string>
+    <string name="player_pause">暂停</string>
+    <string name="player_play">播放</string>
+    <string name="player_close">关闭</string>
+    <string name="player_fullscreen">全屏</string>
+    <string name="player_back">返回</string>
+    <string name="player_prev">上一首</string>
+    <string name="player_next">下一首</string>
+    <string name="player_music_play">音乐播放</string>
+    <string name="player_music_control">音乐播放控制</string>
+
+    <!-- TTS 通知 -->
+    <string name="tts_channel_name">朗读控制</string>
+    <string name="tts_channel_desc">TTS 朗读播放控制</string>
+    <string name="tts_progress_channel">阅读进度</string>
+    <string name="tts_progress_desc">当前阅读进度</string>
+    <string name="tts_prev">上一段</string>
+    <string name="tts_next">下一段</string>
+    <string name="tts_continue">继续</string>
+
+    <!-- 压缩包 -->
+    <string name="archive_read_failed">无法读取压缩包内容</string>
+    <string name="archive_entry_count">%1$d 项</string>
+
+    <!-- 存储 -->
+    <string name="storage_internal">内部存储</string>
+    <string name="storage_sdcard">SD卡</string>
+    <string name="storage_external">外部存储</string>
+    <string name="storage_readonly">存储设备只读，无法删除</string>
+
+    <!-- 操作结果 -->
+    <string name="result_extract_failed">解压失败: %1$s</string>
+    <string name="result_copy_done">已完成 %1$d/%2$d 个文件</string>
+    <string name="result_compress_failed">压缩失败: %1$s</string>
+    <string name="result_create_failed">创建失败</string>
+    <string name="result_file_exists">文件已存在</string>
+    <string name="result_delete_done">已删除 %1$d/%2$d 个文件</string>
+    <string name="result_file_count">%1$d 个文件</string>
+
+    <!-- 阅读器错误 -->
+    <string name="reader_file_not_found">文件不存在: %1$s</string>
+
+    <!-- Shizuku -->
+    <string name="shizuku_not_connected">Shizuku 服务未连接</string>
+
+    <!-- 阅读主题 -->
+    <string name="theme_light">明亮</string>
+    <string name="theme_dark">暗黑</string>
+    <string name="theme_sepia">羊皮纸</string>
+    <string name="theme_green">护眼绿</string>
+    <string name="theme_gray">雅灰</string>
+    <string name="theme_ink">墨水</string>
 
 </resources>

@@ -7,6 +7,7 @@ import com.example.fold.util.FoldLogger
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.fold.AppContainer
+import com.example.fold.R
 import com.example.fold.data.model.BookmarkEntry
 import com.example.fold.data.model.Chapter
 import com.example.fold.data.model.ReaderState
@@ -141,7 +142,7 @@ class ReaderViewModel : ViewModel() {
                 if (tts.isPlaying || tts.currentParagraph > 0) {
                     val paragraphs = ttsParagraphs
                     val currentText = paragraphs.getOrNull(tts.currentParagraph) ?: ""
-                    val title = state.value.fileName.ifEmpty { "朗读中" }
+                    val title = state.value.fileName.ifEmpty { context.getString(R.string.reader_tts_reading) }
                     ReaderNotificationService.updateTts(
                         title = title,
                         paragraph = currentText,

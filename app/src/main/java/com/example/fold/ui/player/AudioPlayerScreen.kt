@@ -400,7 +400,7 @@ fun AudioPlayerScreen(
                         exclusiveLabel = "${device.productName} ${format.label}"
                         vm.init(filePath, state.playlistPaths)
                     } else {
-                        android.widget.Toast.makeText(context, "USB 流创建失败", android.widget.Toast.LENGTH_SHORT).show()
+                        android.widget.Toast.makeText(context, context.getString(R.string.player_usb_stream_failed), android.widget.Toast.LENGTH_SHORT).show()
                     }
                     showUsbDialog = false
                 }

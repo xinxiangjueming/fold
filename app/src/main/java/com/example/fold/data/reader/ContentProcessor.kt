@@ -27,14 +27,25 @@ object ContentProcessor {
     private val QUOTE_CLOSE = charArrayOf('"', DQ_CLOSE.toChar(), SQ_CLOSE.toChar())
     private val QUOTE_ALL = QUOTE_OPEN + QUOTE_CLOSE
 
+    // Pre-compiled regex patterns
+    private val RE_COLON_QUOTE = Regex(":" + "\\s*" + DQ_OPEN.toChar())
+    private val RE_CLOSE_OPEN = Regex(DQ_CLOSE.toChar().toString() + "\\s*" + DQ_OPEN.toChar())
+    private val RE_NEWLINE = Regex("\\r?\\n")
+    private val RE_MULTI_NEWLINE = Regex("\\n+")
+    private val RE_CONSECUTIVE_QUOTES = Regex("([\"\\u201C\\u201D\\u2018\\u2019])([\"\\u201C\\u201D\\u2018\\u2019])")
+    private val RE_QUOTE_PERIOD_QUOTE = Regex("([\"\\u201D\\u2019])([。？！?!.~…])([\"\\u201C\\u2018])")
+    private val RE_QUOTE_PERIOD_NONQUOTE = Regex("([\"\\u201D\\u2019])([。？！?!.~…])([^\"\\u201C\\u2018\\n])")
+    private val RE_SENTENCE_SPLIT = Regex("(?<=[${MARK_END.joinToString("")}])")
+
     fun reSegment(raw: String): List<String> {
         if (raw.isBlank()) return emptyList()
+        if (raw.length < MAX_LINE_LEN) return raw.split(RE_MULTI_NEWLINE).filter { it.isNotBlank() }
 
         // Phase 1 - Normalize quotes
         var t = raw
             .replace("&quot;", DQ_OPEN.toChar().toString())
-            .replace(Regex(":\\s*${DQ_OPEN.toChar()}"), "：" + DQ_OPEN.toChar())
-            .replace(Regex("${DQ_CLOSE.toChar()}\\s*${DQ_OPEN.toChar()}"), "${DQ_CLOSE.toChar()}\n${DQ_OPEN.toChar()}")
+            .replace(RE_COLON_QUOTE, "：" + DQ_OPEN.toChar())
+            .replace(RE_CLOSE_OPEN, "${DQ_CLOSE.toChar()}\n${DQ_OPEN.toChar()}")
 
         // Phase 2 - Merge broken paragraphs
         t = merge(t)
@@ -44,7 +55,7 @@ object ContentProcessor {
 
         // Phase 4 - Quote-aware splitting per segment
         val result = mutableListOf<String>()
-        t.split(Regex("\\n+")).forEach { seg ->
+        t.split(RE_MULTI_NEWLINE).forEach { seg ->
             val s = seg.trim()
             if (s.isNotEmpty()) {
                 result += findNewLines(s)
@@ -71,7 +82,7 @@ object ContentProcessor {
     // ========== Phase 2: Merge ==========
 
     private fun merge(text: String): String {
-        val parts = text.split(Regex("\\r?\\n")).filter { it.isNotBlank() }
+        val parts = text.split(RE_NEWLINE).filter { it.isNotBlank() }
         if (parts.size <= 1) return parts.firstOrNull()?.trim() ?: ""
 
         val sb = StringBuilder(parts[0].trim())
@@ -79,11 +90,10 @@ object ContentProcessor {
             val line = parts[i].trim()
             if (line.isEmpty()) continue
 
-            val prev = sb.toString()
-            val last = prev.last()
+            val last = sb.last()
             val lastIsQuote = last in QUOTE_ALL
-            val keepNl = if (lastIsQuote && prev.length >= 2) {
-                prev[prev.length - 2] in MARK_END
+            val keepNl = if (lastIsQuote && sb.length >= 2) {
+                sb[sb.length - 2] in MARK_END
             } else {
                 last in MARK_END
             }
@@ -99,21 +109,11 @@ object ContentProcessor {
 
     private fun preSplit(text: String): String {
         var t = text
-        // Consecutive quotes -> split
-        t = t.replace(Regex("([\"\\u201C\\u201D\\u2018\\u2019])([\"\\u201C\\u201D\\u2018\\u2019])")) {
-            "${it.groupValues[1]}\n${it.groupValues[2]}"
-        }
-        // Quote + period + quote -> split
-        t = t.replace(Regex("([\"\\u201D\\u2019])([。？！?!.~…])([\"\\u201C\\u2018])")) {
-            "${it.groupValues[1]}${it.groupValues[2]}\n${it.groupValues[3]}"
-        }
-        // Quote + period + non-quote -> split
-        t = t.replace(Regex("([\"\\u201D\\u2019])([。？！?!.~…])([^\"\\u201C\\u2018\\n])")) {
-            "${it.groupValues[1]}${it.groupValues[2]}\n${it.groupValues[3]}"
-        }
-        // Speech verb + period -> split
+        t = RE_CONSECUTIVE_QUOTES.replace(t) { "${it.groupValues[1]}\n${it.groupValues[2]}" }
+        t = RE_QUOTE_PERIOD_QUOTE.replace(t) { "${it.groupValues[1]}${it.groupValues[2]}\n${it.groupValues[3]}" }
+        t = RE_QUOTE_PERIOD_NONQUOTE.replace(t) { "${it.groupValues[1]}${it.groupValues[2]}\n${it.groupValues[3]}" }
         for (v in MARK_SAY) {
-            t = t.replace(Regex("$v。"), "$v。\n")
+            t = t.replace("$v。", "$v。\n")
         }
         return t
     }
@@ -199,8 +199,7 @@ object ContentProcessor {
     private fun forceSplit(text: String): List<String> {
         if (text.length <= MAX_LINE_LEN * 2) return listOf(text)
 
-        val endChars = MARK_END.joinToString("")
-        val sentences = text.split(Regex("(?<=[${endChars}])"))
+        val sentences = text.split(RE_SENTENCE_SPLIT)
             .map { it.trim() }
             .filter { it.isNotEmpty() }
         if (sentences.size >= 3) {

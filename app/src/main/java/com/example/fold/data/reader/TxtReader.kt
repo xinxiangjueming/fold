@@ -1,5 +1,7 @@
 package com.example.fold.data.reader
 
+import com.example.fold.AppContainer
+import com.example.fold.R
 import com.example.fold.util.FoldLogger
 import com.example.fold.data.model.Chapter
 import com.example.fold.data.model.ReaderState
@@ -42,7 +44,7 @@ class TxtReader : ContentReader {
             val file = File(filePath)
             if (!file.exists()) {
                 FoldLogger.e(TAG, "open: file not found: $filePath")
-                _state.value = _state.value.copy(isLoading = false, error = "文件不存在: ${file.name}")
+                _state.value = _state.value.copy(isLoading = false, error = AppContainer.appContext.getString(R.string.reader_file_not_found, file.name))
                 return@withContext
             }
             val fileSize = file.length()

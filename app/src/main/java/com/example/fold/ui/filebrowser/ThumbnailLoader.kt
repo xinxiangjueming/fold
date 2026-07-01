@@ -25,9 +25,9 @@ object ThumbnailLoader {
     private val loadingJobs = ConcurrentHashMap<String, Job>()
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    fun loadThumbnail(imageView: ImageView, file: File, isDark: Boolean) {
+    fun loadThumbnail(imageView: ImageView, file: File, isDark: Boolean, apkIconScale: Float = 0.45f) {
         val path = file.absolutePath
-        val cacheKey = "${path}_${isDark}"
+        val cacheKey = "${path}_${isDark}_${apkIconScale}"
 
         // Check cache first
         cache.get(cacheKey)?.let { bitmap ->
@@ -50,7 +50,7 @@ object ThumbnailLoader {
                     isImageFile(file) -> loadBitmapThumbnail(file)
                     isVideoFile(file) -> loadVideoThumbnail(file)
                     isPdfFile(file) -> loadPdfThumbnail(file, isDark)
-                    isApkFile(file) -> loadApkThumbnail(file)
+                    isApkFile(file) -> loadApkThumbnail(file, apkIconScale)
                     else -> null
                 }
 
@@ -145,7 +145,7 @@ object ThumbnailLoader {
         }
     }
 
-    private fun loadApkThumbnail(file: File): Bitmap? {
+    private fun loadApkThumbnail(file: File, iconScale: Float = 0.45f): Bitmap? {
         return try {
             val context = AppContainer.appContext
             val packageManager = context.packageManager
@@ -162,7 +162,9 @@ object ThumbnailLoader {
                 val drawable = appInfo.loadIcon(packageManager)
                 val bitmap = Bitmap.createBitmap(THUMBNAIL_SIZE, THUMBNAIL_SIZE, Bitmap.Config.ARGB_8888)
                 val canvas = android.graphics.Canvas(bitmap)
-                drawable.setBounds(0, 0, THUMBNAIL_SIZE, THUMBNAIL_SIZE)
+                val iconSize = (THUMBNAIL_SIZE * iconScale).toInt()
+                val offset = (THUMBNAIL_SIZE - iconSize) / 2
+                drawable.setBounds(offset, offset, offset + iconSize, offset + iconSize)
                 drawable.draw(canvas)
                 bitmap
             }

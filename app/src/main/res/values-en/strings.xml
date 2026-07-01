@@ -198,4 +198,122 @@
     <string name="trash_delete_permanently">Delete permanently</string>
     <string name="trash_empty_all">Empty trash</string>
 
+    <!-- Common -->
+    <string name="permission_denied_hint">Storage permission not granted. Please enable "All Files Access" in settings</string>
+    <string name="action_confirm">OK</string>
+
+    <!-- Reader -->
+    <string name="reader_volume_page_turn">Volume key page turn</string>
+    <string name="reader_stealth_mode">Stealth mode</string>
+    <string name="reader_load_failed">Failed to load</string>
+    <string name="reader_reading">Reading</string>
+    <string name="reader_tts_reading">Reading aloud</string>
+    <string name="reader_file_not_found">File not found: %1$s</string>
+
+    <!-- New Folder / New Text -->
+    <string name="action_new_folder">New Folder</string>
+    <string name="action_new_txt">New Text</string>
+    <string name="new_folder_title">New Folder</string>
+    <string name="new_folder_hint">Folder name</string>
+    <string name="new_folder_created">Folder created</string>
+    <string name="new_folder_failed">Creation failed: %1$s</string>
+
+    <!-- Compress -->
+    <string name="action_compress">Compress</string>
+    <string name="action_compress_targz">Compress to TAR.GZ</string>
+    <string name="action_compress_7z">Compress to 7Z</string>
+    <string name="compress_format_title">Select compression format</string>
+
+    <!-- View Mode -->
+    <string name="view_mode_list">List view</string>
+    <string name="view_mode_grid">Grid view</string>
+
+    <!-- Shizuku -->
+    <string name="shizuku_please_start">Please start Shizuku first, then return to this app</string>
+    <string name="shizuku_not_connected">Shizuku service not connected</string>
+
+    <!-- Install -->
+    <string name="install_failed">Installation failed: %1$s</string>
+
+    <!-- File Name -->
+    <string name="file_name_hint">File name</string>
+
+    <!-- Editor -->
+    <string name="editor_unsaved_confirm">File has been modified. Save changes?</string>
+    <string name="editor_save">Save</string>
+    <string name="editor_font_size">Font size</string>
+    <string name="editor_confirm">OK</string>
+    <string name="editor_save_failed">Save failed: %1$s</string>
+
+    <!-- Player -->
+    <string name="player_usb_stream_failed">USB stream creation failed</string>
+    <string name="player_pause">Pause</string>
+    <string name="player_play">Play</string>
+    <string name="player_close">Close</string>
+    <string name="player_fullscreen">Fullscreen</string>
+    <string name="player_back">Back</string>
+    <string name="player_prev">Previous</string>
+    <string name="player_next">Next</string>
+    <string name="player_music_play">Music Playback</string>
+    <string name="player_music_control">Music Playback Control</string>
+
+    <!-- TTS Notifications -->
+    <string name="tts_channel_name">Read Aloud Controls</string>
+    <string name="tts_channel_desc">TTS playback controls</string>
+    <string name="tts_progress_channel">Reading Progress</string>
+    <string name="tts_progress_desc">Current reading progress</string>
+    <string name="tts_prev">Previous Paragraph</string>
+    <string name="tts_next">Next Paragraph</string>
+    <string name="tts_continue">Continue</string>
+
+    <!-- Archive -->
+    <string name="archive_read_failed">Cannot read archive contents</string>
+    <string name="archive_entry_count">%1$d items</string>
+
+    <!-- Storage -->
+    <string name="storage_internal">Internal Storage</string>
+    <string name="storage_sdcard">SD Card</string>
+    <string name="storage_external">External Storage</string>
+    <string name="storage_readonly">Storage is read-only, cannot delete</string>
+
+    <!-- Operation Results -->
+    <string name="result_extract_failed">Extraction failed: %1$s</string>
+    <string name="result_copy_done">%1$d/%2$d files copied</string>
+    <string name="result_compress_failed">Compression failed: %1$s</string>
+    <string name="result_create_failed">Creation failed</string>
+    <string name="result_file_exists">File already exists</string>
+    <string name="result_delete_done">%1$d/%2$d files deleted</string>
+    <string name="result_file_count">%1$d files</string>
+
+    <!-- Reader Themes -->
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="theme_sepia">Sepia</string>
+    <string name="theme_green">Green</string>
+    <string name="theme_gray">Gray</string>
+    <string name="theme_ink">Ink</string>
+
+    <!-- Equalizer -->
+    <string name="eq_title">Equalizer</string>
+    <string name="eq_enabled">Equalizer</string>
+    <string name="eq_bass">Bass</string>
+    <string name="eq_treble">Treble</string>
+    <string name="eq_bands">Bands</string>
+    <string name="eq_custom">Custom</string>
+    <string name="eq_reset">Reset</string>
+    <string name="eq_test">Test</string>
+    <string name="eq_preset_title">Select Preset</string>
+    <string name="eq_preset_flat">Flat</string>
+    <string name="eq_preset_bass_boost">Bass Boost</string>
+    <string name="eq_preset_treble_boost">Treble Boost</string>
+    <string name="eq_preset_vocal">Vocal</string>
+    <string name="eq_preset_rock">Rock</string>
+    <string name="eq_preset_pop">Pop</string>
+    <string name="eq_preset_jazz">Jazz</string>
+    <string name="eq_preset_classical">Classical</string>
+    <string name="eq_preset_electronic">Electronic</string>
+    <string name="eq_status_active">Equalizer active</string>
+    <string name="eq_status_inactive">Equalizer off</string>
+    <string name="eq_current_preset">Current preset: %1$s</string>
+
 </resources>

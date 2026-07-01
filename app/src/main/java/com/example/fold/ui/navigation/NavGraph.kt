@@ -7,7 +7,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -50,6 +52,12 @@ object Routes {
     const val AUDIO_BASE = "audio"
     const val EQ = "eq"
     const val TRASH = "trash"
+    const val TEXT_EDITOR = "text_editor/{filePath}"
+    const val TEXT_EDITOR_BASE = "text_editor"
+
+    fun textEditor(filePath: String): String {
+        return "text_editor/${android.net.Uri.encode(filePath)}"
+    }
 
     fun reader(filePath: String): String {
         return "reader/${android.net.Uri.encode(filePath)}"
@@ -143,7 +151,16 @@ fun AppNavGraph(navController: NavHostController) {
     // 每次重组都读取，确保切换后立即生效（不需要重启app）
     val calculatorMode = context.getSharedPreferences("file_sort", android.content.Context.MODE_PRIVATE)
         .getBoolean("calculator_mode", false)
-    val startDest = if (calculatorMode) Routes.CALCULATOR else Routes.FILE_BROWSER
+
+    // 息屏归隐：强制首帧为计算器，不恢复任何旧导航状态
+    // forceStealthStart 只在 onCreate 设一次，remember 保证只消费一次
+    var stealthConsumed by remember { mutableStateOf(false) }
+    if (MainActivity.forceStealthStart && !stealthConsumed) {
+        stealthConsumed = true
+        MainActivity.forceStealthStart = false
+        FoldLogger.i("NavGraph", "stealth start: forcing calculator as start destination")
+    }
+    val startDest = if (stealthConsumed || calculatorMode) Routes.CALCULATOR else Routes.FILE_BROWSER
 
     // 追踪当前路由，决定是否显示悬浮小窗
     val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -222,9 +239,9 @@ fun AppNavGraph(navController: NavHostController) {
             }
             FileBrowserScreen(
                 onFileClick = { filePath ->
-                    // 目录点击由 FileBrowserScreen 内部处理（截图+导航）
-                    // 非目录文件点击：由 FileBrowserScreen 判断后调用对应回调
-                    FoldLogger.i("NavGraph", "onFileClick: $filePath")
+                    FoldLogger.i("NavGraph", "onFileClick: capturing screenshot")
+                    PredictiveBackManager.captureCurrentScreen(view)
+                    navController.navigate(Routes.reader(filePath))
                 },
                 onImageClick = { filePath ->
                     FoldLogger.i("NavGraph", "onImageClick: capturing screenshot")
@@ -246,6 +263,11 @@ fun AppNavGraph(navController: NavHostController) {
                     PredictiveBackManager.captureCurrentScreen(view)
                     navController.popBackStack(Routes.AUDIO_BASE, true)
                     navController.navigate(Routes.audio(filePath))
+                },
+                onTextEditorClick = { filePath ->
+                    FoldLogger.i("NavGraph", "onTextEditorClick: $filePath")
+                    PredictiveBackManager.captureCurrentScreen(view)
+                    navController.navigate(Routes.textEditor(filePath))
                 },
                 onNavigateToHiddenApps = {
                     FoldLogger.i("NavGraph", "onNavigateToHiddenApps: capturing screenshot")
@@ -289,6 +311,20 @@ fun AppNavGraph(navController: NavHostController) {
                     onRestore = { file, origPath -> viewModel.restoreFromTrash(file.name, origPath ?: "") },
                     onDeletePermanent = { file -> file.delete() },
                     onEmptyTrash = { viewModel.emptyTrash() }
+                )
+            }
+        }
+
+        composable(
+            route = Routes.TEXT_EDITOR,
+            arguments = listOf(navArgument("filePath") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val encodedPath = backStackEntry.arguments?.getString("filePath") ?: ""
+            val filePath = android.net.Uri.decode(encodedPath)
+            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
+                com.example.fold.ui.reader.TextEditorScreen(
+                    filePath = filePath,
+                    onBack = { navController.popBackStack() }
                 )
             }
         }

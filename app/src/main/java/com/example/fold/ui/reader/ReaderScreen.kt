@@ -725,7 +725,7 @@ private fun EpubReaderContent(
     if (loadedHtml.value.isEmpty()) {
         FoldLogger.w("Reader", "loadedHtml empty after loading complete, index=${state.currentChapterIndex}")
         Box(Modifier.fillMaxSize().background(bgColor), contentAlignment = Alignment.Center) {
-            Text("加载失败", color = textColor)
+            Text(stringResource(R.string.reader_load_failed), color = textColor)
         }
         return
     }

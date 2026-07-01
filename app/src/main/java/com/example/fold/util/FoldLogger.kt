@@ -9,6 +9,8 @@ import java.io.FileWriter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 object FoldLogger {
 
@@ -37,6 +39,9 @@ object FoldLogger {
                 }
                 bufferedWriter = BufferedWriter(FileWriter(file, true), 8192)
                 logFile = file
+                // 每 2 秒刷一次盘，平衡性能与日志完整性
+                val scheduler = Executors.newSingleThreadScheduledExecutor()
+                scheduler.scheduleAtFixedRate({ flush() }, 2, 2, TimeUnit.SECONDS)
                 i("FoldLogger", "init OK: ${file.absolutePath}, canWrite=${file.canWrite()}")
                 return
             } catch (e: Exception) {
@@ -79,7 +84,10 @@ object FoldLogger {
         synchronized(lock) {
             try {
                 writer.write(line)
-                writer.flush() // 每条都刷盘，确保崩溃时日志不丢
+                // 仅 error/crash 时立即刷盘，其余靠 8KB 缓冲 + 2 秒定时刷盘
+                if (level == "E" || level == "F") {
+                    writer.flush()
+                }
                 writeFailCount = 0
             } catch (e: Exception) {
                 writeFailCount++

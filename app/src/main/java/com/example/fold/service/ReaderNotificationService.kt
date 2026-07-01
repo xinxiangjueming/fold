@@ -144,14 +144,14 @@ class ReaderNotificationService : Service() {
     private fun createChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             notifManager.createNotificationChannel(
-                NotificationChannel(CHANNEL_TTS, "朗读控制", NotificationManager.IMPORTANCE_LOW).apply {
-                    description = "TTS 朗读播放控制"
+                NotificationChannel(CHANNEL_TTS, getString(R.string.tts_channel_name), NotificationManager.IMPORTANCE_LOW).apply {
+                    description = getString(R.string.tts_channel_desc)
                     setShowBadge(false)
                 }
             )
             notifManager.createNotificationChannel(
-                NotificationChannel(CHANNEL_PROGRESS, "阅读进度", NotificationManager.IMPORTANCE_LOW).apply {
-                    description = "当前阅读进度"
+                NotificationChannel(CHANNEL_PROGRESS, getString(R.string.tts_progress_channel), NotificationManager.IMPORTANCE_LOW).apply {
+                    description = getString(R.string.tts_progress_desc)
                     setShowBadge(false)
                 }
             )
@@ -261,7 +261,7 @@ class ReaderNotificationService : Service() {
         if (isPlaying) {
             builder.addAction(
                 NotificationCompat.Action(
-                    android.R.drawable.ic_media_previous, "上一段",
+                    android.R.drawable.ic_media_previous, getString(R.string.tts_prev),
                     PendingIntent.getBroadcast(this, 101,
                         Intent("com.example.fold.TTS_PREV"),
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
@@ -269,7 +269,7 @@ class ReaderNotificationService : Service() {
             )
             builder.addAction(
                 NotificationCompat.Action(
-                    android.R.drawable.ic_media_pause, "暂停",
+                    android.R.drawable.ic_media_pause, getString(R.string.player_pause),
                     PendingIntent.getBroadcast(this, 102,
                         Intent("com.example.fold.TTS_PAUSE"),
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
@@ -277,7 +277,7 @@ class ReaderNotificationService : Service() {
             )
             builder.addAction(
                 NotificationCompat.Action(
-                    android.R.drawable.ic_media_next, "下一段",
+                    android.R.drawable.ic_media_next, getString(R.string.tts_next),
                     PendingIntent.getBroadcast(this, 103,
                         Intent("com.example.fold.TTS_NEXT"),
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
@@ -286,7 +286,7 @@ class ReaderNotificationService : Service() {
         } else {
             builder.addAction(
                 NotificationCompat.Action(
-                    android.R.drawable.ic_media_play, "继续",
+                    android.R.drawable.ic_media_play, getString(R.string.tts_continue),
                     PendingIntent.getBroadcast(this, 104,
                         Intent("com.example.fold.TTS_RESUME"),
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
@@ -330,7 +330,7 @@ class ReaderNotificationService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val title = bookName.ifEmpty { "阅读中" }
+        val title = bookName.ifEmpty { getString(R.string.reader_reading) }
         val text = if (chapterName.isNotEmpty()) "$chapterName · $percent%" else ""
 
         val builder = NotificationCompat.Builder(this, CHANNEL_PROGRESS)
