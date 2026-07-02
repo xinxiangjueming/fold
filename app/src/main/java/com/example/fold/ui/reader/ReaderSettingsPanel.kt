@@ -92,7 +92,7 @@ internal fun ReaderSettingsPanel(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = theme.label.first().toString(),
+                            text = stringResource(theme.labelResId).first().toString(),
                             color = androidx.compose.ui.graphics.Color(theme.textColor),
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.Bold

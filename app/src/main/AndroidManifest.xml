@@ -115,6 +115,11 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".ui.reader.TextEditorActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Fold" />
+
         <!-- Fold 模式入口（默认启用） -->
         <activity-alias
             android:name=".AliasFold"

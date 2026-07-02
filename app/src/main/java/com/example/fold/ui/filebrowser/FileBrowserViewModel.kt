@@ -58,6 +58,7 @@ data class FileBrowserState(
     val renamingFile: FileItem? = null,
     val copiedPath: String? = null,
     val sharingFile: FileItem? = null,
+    val sharingFiles: List<FileItem> = emptyList(),
     val propertiesFile: FileItem? = null,
     val isServerRunning: Boolean = false,
     val serverUrl: String = "",
@@ -538,6 +539,20 @@ class FileBrowserViewModel : ViewModel() {
     fun clearSharingFile() {
         FoldLogger.d(TAG, "clearSharingFile")
         _state.update { it.copy(sharingFile = null) }
+    }
+
+    fun batchShare() {
+        val selected = _state.value.selectedFiles
+        if (selected.isEmpty()) return
+        val files = _files.value.filter { it.path in selected && !it.isDirectory }
+        if (files.isEmpty()) return
+        FoldLogger.d(TAG, "batchShare: ${files.size} files")
+        _state.update { it.copy(sharingFiles = files, selectionMode = false, selectedFiles = emptySet()) }
+    }
+
+    fun clearSharingFiles() {
+        FoldLogger.d(TAG, "clearSharingFiles")
+        _state.update { it.copy(sharingFiles = emptyList()) }
     }
 
     fun showProperties(file: FileItem) {

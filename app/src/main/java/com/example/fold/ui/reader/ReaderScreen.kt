@@ -130,7 +130,7 @@ fun ReaderScreen(
     val theme = state.readingTheme
     val bgColor = androidx.compose.ui.graphics.Color(theme.bgColor)
     val textColor = androidx.compose.ui.graphics.Color(theme.textColor)
-    FoldLogger.d("Reader", "theme=${theme.label}, isLight=${theme.isLight}, bgColor=$bgColor, textColor=$textColor")
+    FoldLogger.d("Reader", "theme=${stringResource(theme.labelResId)}, isLight=${theme.isLight}, bgColor=$bgColor, textColor=$textColor")
 
     // 用阅读主题颜色覆盖 MaterialTheme，让所有组件跟随主题变化
     val readerColorScheme = MaterialTheme.colorScheme.copy(

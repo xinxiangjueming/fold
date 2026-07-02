@@ -3,8 +3,11 @@ package com.example.fold.ui.reader
 import android.graphics.Color
 import android.graphics.Typeface
 import android.text.Editable
+import android.text.InputType
 import android.text.TextWatcher
+import android.view.MotionEvent
 import android.widget.EditText
+import android.widget.FrameLayout
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -144,12 +147,12 @@ fun TextEditorScreen(
         ) {
             when {
                 isLoading -> {
-                    CircularProgressIndicator(modifier = Modifier.align(androidx.compose.ui.Alignment.Center))
+                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                 }
                 loadError != null -> {
                     Column(
-                        modifier = Modifier.align(androidx.compose.ui.Alignment.Center),
-                        horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
+                        modifier = Modifier.align(Alignment.Center),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(loadError!!, color = MaterialTheme.colorScheme.error)
                         Spacer(Modifier.height(8.dp))
@@ -159,7 +162,24 @@ fun TextEditorScreen(
                 else -> {
                     AndroidView(
                         factory = { ctx ->
-                            EditText(ctx).apply {
+                            val container = object : FrameLayout(ctx) {
+                                override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+                                    when (ev.action) {
+                                        MotionEvent.ACTION_DOWN -> {
+                                            parent?.requestDisallowInterceptTouchEvent(true)
+                                        }
+                                        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                                            parent?.requestDisallowInterceptTouchEvent(false)
+                                        }
+                                    }
+                                    return super.dispatchTouchEvent(ev)
+                                }
+                            }
+                            container.layoutParams = FrameLayout.LayoutParams(
+                                FrameLayout.LayoutParams.MATCH_PARENT,
+                                FrameLayout.LayoutParams.MATCH_PARENT
+                            )
+                            val editText = EditText(ctx).apply {
                                 typeface = Typeface.MONOSPACE
                                 textSize = fontSize.toFloat()
                                 setPadding(32, 16, 32, 16)
@@ -168,21 +188,31 @@ fun TextEditorScreen(
                                 setBackgroundColor(Color.TRANSPARENT)
                                 setTextColor(if (isDark) Color.parseColor("#E0E0E0") else Color.parseColor("#1F1F1F"))
                                 setHintTextColor(if (isDark) Color.parseColor("#666666") else Color.parseColor("#999999"))
+                                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                                isScrollContainer = true
+                                isSingleLine = false
+                                overScrollMode = EditText.OVER_SCROLL_ALWAYS
+                                setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
+                                var hasModified = false
                                 addTextChangedListener(object : TextWatcher {
                                     override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                                     override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
                                     override fun afterTextChanged(s: Editable?) {
-                                        isModified = s?.toString() != originalText
+                                        if (!hasModified) {
+                                            hasModified = true
+                                        }
+                                        isModified = true
                                     }
                                 })
                                 editTextRef.value = this
                             }
+                            container.addView(editText, FrameLayout.LayoutParams(
+                                FrameLayout.LayoutParams.MATCH_PARENT,
+                                FrameLayout.LayoutParams.MATCH_PARENT
+                            ))
+                            container
                         },
-                        update = { et ->
-                            et.setBackgroundColor(Color.TRANSPARENT)
-                            et.setTextColor(if (isDark) Color.parseColor("#E0E0E0") else Color.parseColor("#1F1F1F"))
-                            et.textSize = fontSize.toFloat()
-                        },
+                        update = { },
                         modifier = Modifier.fillMaxSize()
                     )
                 }

@@ -1,5 +1,6 @@
 package com.example.fold.ui.filebrowser
 
+import android.os.Parcelable
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -282,6 +283,11 @@ fun FileBrowserScreen(
                             }
                             IconButton(onClick = { viewModel.prepareBatchCompress() }) {
                                 Icon(Icons.Filled.Archive, contentDescription = stringResource(R.string.action_compress))
+                            }
+                            if (state.selectedFiles.any { path -> files.none { it.path == path && it.isDirectory } }) {
+                                IconButton(onClick = { viewModel.batchShare() }) {
+                                    Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.action_share))
+                                }
                             }
                         } else {
                             if (!searchActive) {
@@ -738,6 +744,29 @@ fun FileBrowserScreen(
                         FoldLogger.e(TAG, "share failed: ${e.message}")
                     }
                     viewModel.clearSharingFile()
+                }
+            }
+
+            // 批量分享
+            state.sharingFiles.takeIf { it.isNotEmpty() }?.let { files ->
+                LaunchedEffect(files) {
+                    try {
+                        val uris = files.map { file ->
+                            val fileObj = java.io.File(file.path)
+                            androidx.core.content.FileProvider.getUriForFile(
+                                context, "${context.packageName}.provider", fileObj
+                            )
+                        }
+                        val intent = android.content.Intent(android.content.Intent.ACTION_SEND_MULTIPLE).apply {
+                            type = "*/*"
+                            putParcelableArrayListExtra(android.content.Intent.EXTRA_STREAM, ArrayList(uris))
+                            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        context.startActivity(android.content.Intent.createChooser(intent, context.getString(R.string.action_share)))
+                    } catch (e: Exception) {
+                        FoldLogger.e(TAG, "batch share failed: ${e.message}")
+                    }
+                    viewModel.clearSharingFiles()
                 }
             }
 

@@ -186,7 +186,7 @@
     <string name="search_files">Search files…</string>
 
     <!-- Multi-select -->
-    <string name="action_select">Select</string>
+    <string name="action_select">Multi-select</string>
     <string name="select_all">Select All</string>
     <string name="selected_count">%1$d selected</string>
 

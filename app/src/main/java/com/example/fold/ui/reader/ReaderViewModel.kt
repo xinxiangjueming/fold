@@ -74,8 +74,8 @@ class ReaderViewModel : ViewModel() {
         } else {
             // 首次使用：跟随系统深浅色模式
             val nightModeFlags = context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK
-            if (nightModeFlags == android.content.res.Configuration.UI_MODE_NIGHT_YES) ReadingTheme.DARK.label
-            else ReadingTheme.LIGHT.label
+            if (nightModeFlags == android.content.res.Configuration.UI_MODE_NIGHT_YES) ReadingTheme.DARK.name
+            else ReadingTheme.LIGHT.name
         }
     }
     private var userMarginLeft = prefs.getFloat(KEY_MARGIN_LEFT, 20f)
@@ -92,10 +92,10 @@ class ReaderViewModel : ViewModel() {
                 val nightMode = newConfig.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK
                 val newTheme = if (nightMode == android.content.res.Configuration.UI_MODE_NIGHT_YES)
                     ReadingTheme.DARK else ReadingTheme.LIGHT
-                if (newTheme.label != userThemeName) {
-                    userThemeName = newTheme.label
+                if (newTheme.name != userThemeName) {
+                    userThemeName = newTheme.name
                     _state.update { it.copy(readingTheme = newTheme) }
-                    FoldLogger.i(TAG, "System dark mode changed, theme → ${newTheme.label}")
+                    FoldLogger.i(TAG, "System dark mode changed, theme → ${newTheme.name}")
                 }
             }
         }
@@ -417,7 +417,7 @@ class ReaderViewModel : ViewModel() {
         FoldLogger.d(TAG, "updateReadingTheme: oldTheme=${_state.value.readingTheme}, newTheme=$theme")
         userManuallySetTheme = true
         _state.update { it.copy(readingTheme = theme) }
-        prefs.edit().putString(KEY_READING_THEME, theme.label).apply()
+        prefs.edit().putString(KEY_READING_THEME, theme.name).apply()
     }
 
     // ===== 边距 =====

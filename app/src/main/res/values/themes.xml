@@ -4,4 +4,12 @@
         <item name="android:windowBackground">@color/splash_background</item>
         <item name="android:windowLightStatusBar">true</item>
     </style>
+
+    <style name="RoundedDialog" parent="Theme.MaterialComponents.DayNight.Dialog.Alert">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsFloating">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="colorSurface">@android:color/white</item>
+        <item name="colorOnSurface">@android:color/black</item>
+    </style>
 </resources>

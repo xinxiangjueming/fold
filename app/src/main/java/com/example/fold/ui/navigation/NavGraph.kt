@@ -169,11 +169,15 @@ fun AppNavGraph(navController: NavHostController) {
     val showMiniPlayer = currentRoute != Routes.AUDIO && currentRoute != Routes.EQ && miniState.filePath.isNotEmpty() && currentRoute != null
 
     // 同步当前路由到 Activity（用于 savedInstanceState 恢复）+ SharedPreferences 持久化
+    // 只保存独立页面路由，不保存需要文件路径的路由
     androidx.compose.runtime.LaunchedEffect(currentRoute) {
         if (currentRoute != null) {
             MainActivity.currentNavRoute = currentRoute
-            context.getSharedPreferences("nav_state", android.content.Context.MODE_PRIVATE)
-                .edit().putString("current_route", currentRoute).apply()
+            val restorableRoutes = listOf("file_browser", "calculator", "hidden_apps", "trash", "eq")
+            if (currentRoute in restorableRoutes) {
+                context.getSharedPreferences("nav_state", android.content.Context.MODE_PRIVATE)
+                    .edit().putString("current_route", currentRoute).apply()
+            }
         }
     }
 
@@ -266,8 +270,7 @@ fun AppNavGraph(navController: NavHostController) {
                 },
                 onTextEditorClick = { filePath ->
                     FoldLogger.i("NavGraph", "onTextEditorClick: $filePath")
-                    PredictiveBackManager.captureCurrentScreen(view)
-                    navController.navigate(Routes.textEditor(filePath))
+                    com.example.fold.ui.reader.TextEditorActivity.start(context, filePath)
                 },
                 onNavigateToHiddenApps = {
                     FoldLogger.i("NavGraph", "onNavigateToHiddenApps: capturing screenshot")

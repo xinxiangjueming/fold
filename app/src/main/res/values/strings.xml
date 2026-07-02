@@ -223,7 +223,7 @@
     <string name="search_files">搜索文件…</string>
 
     <!-- 多选 -->
-    <string name="action_select">选择</string>
+    <string name="action_select">多选</string>
     <string name="select_all">全选</string>
     <string name="selected_count">已选择 %1$d 项</string>
 

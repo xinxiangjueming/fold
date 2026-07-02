@@ -119,10 +119,12 @@ class MainActivity : AppCompatActivity() {
 
         // Activity 重建时恢复路由（从 savedInstanceState 或 SharedPreferences）
         // 息屏归隐时跳过，避免闪现真实页面
+        // 不恢复需要文件路径的路由（audio/reader/image/video等），避免调试安装后跳到播放页
         if (!isStealthResume) {
             val savedRoute = savedInstanceState?.getString("current_route")
                 ?: getSharedPreferences("nav_state", MODE_PRIVATE).getString("current_route", null)
-            if (savedRoute != null && savedRoute !in listOf("file_browser", "calculator")) {
+            val restorableRoutes = listOf("file_browser", "calculator", "hidden_apps", "trash", "eq")
+            if (savedRoute != null && savedRoute in restorableRoutes) {
                 FoldLogger.i(TAG, "onCreate: restoring route=$savedRoute")
                 pendingRestoreRoute.value = savedRoute
             }
@@ -132,7 +134,8 @@ class MainActivity : AppCompatActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         val route = currentNavRoute
-        if (route != null) {
+        val restorableRoutes = listOf("file_browser", "calculator", "hidden_apps", "trash", "eq")
+        if (route != null && route in restorableRoutes) {
             outState.putString("current_route", route)
             FoldLogger.d(TAG, "onSaveInstanceState: saved route=$route")
         }

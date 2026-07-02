@@ -273,7 +273,7 @@
     <string name="search_files">搜尋檔案…</string>
 
     <!-- 多選 -->
-    <string name="action_select">選擇</string>
+    <string name="action_select">多選</string>
     <string name="select_all">全選</string>
     <string name="selected_count">已選擇 %1$d 項</string>
 
