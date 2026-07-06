@@ -256,21 +256,60 @@ class FileBrowserViewModel : ViewModel() {
         try {
             // 内部存储
             volumes.add(StorageVolume(app.getString(R.string.storage_internal), "/storage/emulated/0", false))
-            // 检测外部存储
+
             val sm = app.getSystemService(Context.STORAGE_SERVICE) as android.os.storage.StorageManager
-            for (volume in sm.storageVolumes) {
-                val path = volume.directory?.absolutePath ?: continue
-                if (path == "/storage/emulated/0") continue
-                val isRemovable = volume.isRemovable
-                val isReadOnly = volume.state == "mounted_ro"
-                val name = when {
-                    path.contains("usb") || path.contains("otg") -> "OTG"
-                    path.contains("sdcard1") || path.contains("ext_sd") -> app.getString(R.string.storage_sdcard)
-                    isRemovable -> app.getString(R.string.storage_external)
-                    else -> continue
+
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                // API 30+: 直接用 StorageVolume.getDirectory()
+                for (volume in sm.storageVolumes) {
+                    val path = volume.directory?.absolutePath ?: continue
+                    if (path == "/storage/emulated/0") continue
+                    val isRemovable = volume.isRemovable
+                    val isReadOnly = volume.state == "mounted_ro"
+                    val name = when {
+                        path.contains("usb") || path.contains("otg") -> "OTG"
+                        path.contains("sdcard1") || path.contains("ext_sd") -> app.getString(R.string.storage_sdcard)
+                        isRemovable -> app.getString(R.string.storage_external)
+                        else -> continue
+                    }
+                    volumes.add(StorageVolume(name, path, isRemovable, isReadOnly))
+                    FoldLogger.i(TAG, "detectStorageVolumes: found $name at $path (removable=$isRemovable, readOnly=$isReadOnly, state=${volume.state})")
                 }
-                volumes.add(StorageVolume(name, path, isRemovable, isReadOnly))
-                FoldLogger.i(TAG, "detectStorageVolumes: found $name at $path (removable=$isRemovable, readOnly=$isReadOnly, state=${volume.state})")
+            } else {
+                // API 24-29: StorageVolume 没有 getDirectory()，通过扫描 /storage 目录检测
+                val storageDir = java.io.File("/storage")
+                if (storageDir.exists() && storageDir.isDirectory) {
+                    val knownPaths = mutableSetOf("/storage/emulated/0")
+                    for (volume in sm.storageVolumes) {
+                        val uuid = volume.uuid ?: continue
+                        val path = "/storage/$uuid"
+                        if (path in knownPaths) continue
+                        val isRemovable = volume.isRemovable
+                        val isReadOnly = volume.state == "mounted_ro"
+                        val name = when {
+                            path.contains("usb") || path.contains("otg") -> "OTG"
+                            path.contains("sdcard1") || path.contains("ext_sd") -> app.getString(R.string.storage_sdcard)
+                            isRemovable -> app.getString(R.string.storage_external)
+                            else -> continue
+                        }
+                        volumes.add(StorageVolume(name, path, isRemovable, isReadOnly))
+                        knownPaths.add(path)
+                        FoldLogger.i(TAG, "detectStorageVolumes: found $name at $path (uuid=$uuid, removable=$isRemovable)")
+                    }
+                    // 兜底：如果 getStorageVolumes 没返回足够信息，扫描 /storage 目录
+                    if (volumes.size <= 1) {
+                        for (child in storageDir.listFiles() ?: emptyArray()) {
+                            if (!child.isDirectory || child.absolutePath in knownPaths) continue
+                            val name = when {
+                                child.name.contains("usb") || child.name.contains("otg") -> "OTG"
+                                child.name.contains("sdcard") -> app.getString(R.string.storage_sdcard)
+                                else -> continue
+                            }
+                            volumes.add(StorageVolume(name, child.absolutePath, true))
+                            FoldLogger.i(TAG, "detectStorageVolumes: fallback found $name at ${child.absolutePath}")
+                        }
+                    }
+                }
             }
         } catch (e: Exception) {
             FoldLogger.e(TAG, "detectStorageVolumes: failed", e)
@@ -292,16 +331,32 @@ class FileBrowserViewModel : ViewModel() {
             FileObserver.CLOSE_WRITE or
             FileObserver.ATTRIB
 
-        fileObserver = object : FileObserver(dir, mask) {
-            override fun onEvent(event: Int, eventPath: String?) {
-                if (isObserverRefresh) return
-                val name = eventPath ?: return
-                if (name == "fold.log") return
-                val eName = event and 0xFFF
-                FoldLogger.d(TAG, "FileObserver: event=$eName path=$name")
-                observerEventCount++
-                mainHandler.removeCallbacks(refreshRunnable)
-                mainHandler.postDelayed(refreshRunnable, 200)
+        // FileObserver(File, int) 仅 API 29+，API 28 及以下用 FileObserver(String, int)
+        fileObserver = if (android.os.Build.VERSION.SDK_INT >= 29) {
+            object : FileObserver(dir, mask) {
+                override fun onEvent(event: Int, eventPath: String?) {
+                    if (isObserverRefresh) return
+                    val name = eventPath ?: return
+                    if (name == "fold.log") return
+                    val eName = event and 0xFFF
+                    FoldLogger.d(TAG, "FileObserver: event=$eName path=$name")
+                    observerEventCount++
+                    mainHandler.removeCallbacks(refreshRunnable)
+                    mainHandler.postDelayed(refreshRunnable, 200)
+                }
+            }
+        } else {
+            object : FileObserver(path, mask) {
+                override fun onEvent(event: Int, eventPath: String?) {
+                    if (isObserverRefresh) return
+                    val name = eventPath ?: return
+                    if (name == "fold.log") return
+                    val eName = event and 0xFFF
+                    FoldLogger.d(TAG, "FileObserver: event=$eName path=$name")
+                    observerEventCount++
+                    mainHandler.removeCallbacks(refreshRunnable)
+                    mainHandler.postDelayed(refreshRunnable, 200)
+                }
             }
         }
         try {
