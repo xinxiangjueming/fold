@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 全局深色模式状态（单例）：0 = 跟随系统, 1 = 强制深色, 2 = 强制浅色
@@ -176,7 +177,13 @@ fun FoldTheme(
             error = animateColorAsState(targetColors.error, animSpec, "error").value,
             onError = animateColorAsState(targetColors.onError, animSpec, "onError").value,
         )
-        MaterialTheme(colorScheme = animatedColors, content = content)
+        val miuixThemeController = top.yukonga.miuix.kmp.theme.ThemeController(
+            colorSchemeMode = if (darkTheme) top.yukonga.miuix.kmp.theme.ColorSchemeMode.Dark else top.yukonga.miuix.kmp.theme.ColorSchemeMode.Light,
+            isDark = darkTheme
+        )
+        MiuixTheme(controller = miuixThemeController) {
+            MaterialTheme(colorScheme = animatedColors, content = content)
+        }
     }
 }
 

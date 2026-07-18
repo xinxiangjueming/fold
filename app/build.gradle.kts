@@ -97,6 +97,7 @@ dependencies {
 
     // Navigation
     implementation("androidx.navigation:navigation-compose:2.8.5")
+    implementation("androidx.navigationevent:navigationevent-compose:1.0.0")
 
     // Lifecycle + ViewModel
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")

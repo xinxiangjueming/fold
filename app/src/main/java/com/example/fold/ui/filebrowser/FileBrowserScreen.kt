@@ -1,11 +1,16 @@
 package com.example.fold.ui.filebrowser
 
+import android.content.res.Configuration
 import android.os.Parcelable
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -22,11 +27,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.graphicsLayer
+
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -35,7 +39,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.PopupProperties
-import androidx.core.view.doOnNextLayout
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.fold.R
@@ -44,7 +47,6 @@ import com.example.fold.ui.theme.*
 import com.example.fold.ui.theme.LocalDarkMode
 import com.example.fold.ui.theme.toggleDarkMode
 import com.example.fold.util.FoldLogger
-import androidx.core.view.drawToBitmap
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -79,7 +81,6 @@ fun FileBrowserScreen(
     val files by viewModel.files.collectAsStateWithLifecycle()
     val calculatorMode by viewModel.calculatorMode.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val view = LocalView.current
 
     DisposableEffect(viewModel) {
         viewModel.onCalculatorModeChanged = { isCalc ->
@@ -90,28 +91,29 @@ fun FileBrowserScreen(
     }
 
     val isAtRoot = state.currentPath == viewModel.getRootPath()
-    val hasScreenshot = com.example.fold.ui.common.PredictiveBackManager.previousScreenshot != null
 
-    var pbProgress by remember { mutableFloatStateOf(0f) }
-    androidx.activity.compose.PredictiveBackHandler(enabled = !isAtRoot && hasScreenshot) { backEvent ->
-        try {
-            backEvent.collect { event -> pbProgress = event.progress }
-            pbProgress = 1f
-            viewModel.navigateUp()
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            pbProgress = 0f
-        }
-    }
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val screenWidthDp = configuration.screenWidthDp
+    val gridColumns = ((screenWidthDp - 16) / 90).coerceIn(3, 8)
+
+    var searchActive by remember { mutableStateOf(false) }
+    var searchText by remember { mutableStateOf("") }
 
     val isDialogOpen = state.selectionMode || state.renamingFile != null ||
         state.showSortDialog || state.showHttpDialog || state.showBatchCompressDialog
-    BackHandler(enabled = isDialogOpen || (!isAtRoot && !hasScreenshot)) {
+    BackHandler(enabled = isDialogOpen || searchActive || !isAtRoot) {
         when {
             state.selectionMode -> viewModel.toggleSelectionMode()
             state.renamingFile != null -> viewModel.cancelRename()
             state.showSortDialog -> viewModel.hideSortDialog()
             state.showHttpDialog -> viewModel.hideHttpDialog()
             state.showBatchCompressDialog -> viewModel.dismissBatchCompressDialog()
+            searchActive -> {
+                searchActive = false
+                searchText = ""
+                viewModel.clearSearch()
+            }
             !isAtRoot -> viewModel.navigateUp()
         }
     }
@@ -136,64 +138,9 @@ fun FileBrowserScreen(
     var showMoreMenu by remember { mutableStateOf(false) }
     var compressTargetFile by remember { mutableStateOf<FileItem?>(null) }
 
-    var backProgress by remember { mutableFloatStateOf(0f) }
-    var isBackGestureActive by remember { mutableStateOf(false) }
-    var searchActive by remember { mutableStateOf(false) }
-    var searchText by remember { mutableStateOf("") }
-
-    androidx.activity.compose.PredictiveBackHandler(enabled = state.currentPath != getDisplayRoot(state) || searchActive || state.selectionMode) { backEvent ->
-        try {
-            android.util.Log.d("PredictiveBack", "FileBrowser: gesture START, screenshot=${com.example.fold.ui.common.PredictiveBackManager.previousScreenshot != null}")
-            backEvent.collect { event ->
-                backProgress = event.progress
-                isBackGestureActive = true
-                if (event.progress < 0.05f) {
-                    android.util.Log.d("PredictiveBack", "FileBrowser: gesture PROGRESS=${event.progress}, screenshot=${com.example.fold.ui.common.PredictiveBackManager.previousScreenshot != null}")
-                }
-            }
-            isBackGestureActive = false
-            backProgress = 0f
-            if (state.selectionMode) {
-                viewModel.toggleSelectionMode()
-            } else if (searchActive) {
-                searchActive = false
-                searchText = ""
-                viewModel.clearSearch()
-            } else {
-                viewModel.navigateUp()
-            }
-            com.example.fold.ui.common.PredictiveBackManager.clear()
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            isBackGestureActive = false
-            backProgress = 0f
-        }
-    }
-
-    val backScale = 1f - (backProgress * 0.08f)
-    val backTranslationX = backProgress * 100f
-    val backCornerRadius = 16f + (backProgress * 8f)
-
     Box(Modifier.fillMaxSize()) {
-        val prevScreenshot = com.example.fold.ui.common.PredictiveBackManager.previousScreenshot
-        android.util.Log.d("PredictiveBack", "FileBrowser: rendering, backProgress=$backProgress, screenshot=${prevScreenshot != null}")
-        prevScreenshot?.let { bmp ->
-            androidx.compose.foundation.Image(
-                bitmap = bmp.asImageBitmap(),
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize()
-            )
-        }
-
         Box(
-            Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    scaleX = backScale
-                    scaleY = backScale
-                    translationX = backTranslationX
-                    shape = RoundedCornerShape(backCornerRadius.dp)
-                    clip = true
-                }
+            Modifier.fillMaxSize()
         ) {
             Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
                 // TopAppBar
@@ -506,9 +453,6 @@ fun FileBrowserScreen(
                             onClick = { file ->
                                 when {
                                     file.isDirectory -> {
-                                        android.util.Log.d("PredictiveBack", "FileBrowser: capturing screen before navigate, view=${view.width}x${view.height}")
-                                        com.example.fold.ui.common.PredictiveBackManager.captureCurrentScreen(view)
-                                        android.util.Log.d("PredictiveBack", "FileBrowser: after capture, screenshot=${com.example.fold.ui.common.PredictiveBackManager.previousScreenshot != null}, size=${com.example.fold.ui.common.PredictiveBackManager.previousScreenshot?.width}x${com.example.fold.ui.common.PredictiveBackManager.previousScreenshot?.height}")
                                         viewModel.onFileClick(file)
                                     }
                                     file.extension.lowercase() in setOf("jpg","jpeg","png","gif","webp","bmp","svg") -> onImageClick(file.path)
@@ -587,7 +531,7 @@ fun FileBrowserScreen(
                         factory = { ctx ->
                             androidx.recyclerview.widget.RecyclerView(ctx).apply {
                                 layoutManager = if (state.viewMode == ViewMode.GRID) {
-                                    androidx.recyclerview.widget.GridLayoutManager(ctx, 3)
+                                    androidx.recyclerview.widget.GridLayoutManager(ctx, gridColumns)
                                 } else {
                                     androidx.recyclerview.widget.LinearLayoutManager(ctx)
                                 }
@@ -622,7 +566,7 @@ fun FileBrowserScreen(
                         update = { rv ->
                             // 切换 LayoutManager
                             val targetLM = if (state.viewMode == ViewMode.GRID) {
-                                androidx.recyclerview.widget.GridLayoutManager(rv.context, 3)
+                                androidx.recyclerview.widget.GridLayoutManager(rv.context, gridColumns)
                             } else {
                                 androidx.recyclerview.widget.LinearLayoutManager(rv.context)
                             }

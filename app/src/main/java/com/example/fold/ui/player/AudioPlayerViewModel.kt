@@ -281,7 +281,7 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun togglePlay() { ensurePlayer(); if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play() }
-    fun prev() { ensurePlayer(); if (exoPlayer.hasPreviousMediaItem()) exoPlayer.seekToPrevious() else exoPlayer.seekTo(0) }
+    fun prev() { ensurePlayer(); val idx = exoPlayer.currentMediaItemIndex; if (idx > 0) exoPlayer.seekTo(idx - 1, 0) else exoPlayer.seekTo(0) }
     fun next() { ensurePlayer(); if (exoPlayer.hasNextMediaItem()) exoPlayer.seekToNext() else exoPlayer.seekTo(0) }
     fun seekTo(position: Long) { ensurePlayer(); exoPlayer.seekTo(position) }
     fun seekToIndex(index: Int) { ensurePlayer(); exoPlayer.seekTo(index, 0); exoPlayer.play() }
@@ -328,13 +328,17 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
     // ===== 睡眠定时 =====
 
+    private var sleepJob: kotlinx.coroutines.Job? = null
+
     fun setSleep(minutes: Int, finishSong: Boolean = false) {
+        // 取消旧的倒计时
+        sleepJob?.cancel()
         _state.value = _state.value.copy(
             sleepMinutes = minutes,
             sleepRemaining = minutes * 60,  // 转成秒
             sleepFinishSong = finishSong
         )
-        viewModelScope.launch {
+        sleepJob = viewModelScope.launch {
             var remaining = minutes * 60  // 秒
             while (remaining > 0 && isActive) {
                 delay(1000)  // 每秒更新
@@ -342,16 +346,20 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
                 _state.value = _state.value.copy(sleepRemaining = remaining)
             }
             // 倒计时结束
-            if (_state.value.sleepFinishSong) {
-                _state.value = _state.value.copy(sleepRemaining = -1)
-            } else {
-                exoPlayer.pause()
-                _state.value = _state.value.copy(sleepMinutes = 0, sleepRemaining = 0)
+            if (isActive) {
+                if (_state.value.sleepFinishSong) {
+                    _state.value = _state.value.copy(sleepRemaining = -1)
+                } else {
+                    exoPlayer.pause()
+                    _state.value = _state.value.copy(sleepMinutes = 0, sleepRemaining = 0)
+                }
             }
         }
     }
 
     fun cancelSleep() {
+        sleepJob?.cancel()
+        sleepJob = null
         _state.value = _state.value.copy(sleepMinutes = 0, sleepRemaining = 0, sleepFinishSong = false)
     }
 

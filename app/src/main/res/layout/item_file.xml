@@ -90,6 +90,15 @@
             android:visibility="gone"
             android:importantForAccessibility="no" />
 
+        <!-- Selection check circle -->
+        <ImageView
+            android:id="@+id/selection_icon"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:layout_marginStart="8dp"
+            android:visibility="gone"
+            android:importantForAccessibility="no" />
+
     </LinearLayout>
 
 </com.google.android.material.card.MaterialCardView>

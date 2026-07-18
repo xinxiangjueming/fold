@@ -2,6 +2,9 @@ package com.example.fold.ui.eq
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -12,6 +15,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
@@ -43,43 +48,43 @@ fun EqScreen(onBack: () -> Unit) {
     val state by EqManager.state.collectAsState()
     var showPresets by remember { mutableStateOf(false) }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.eq_title)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.action_back))
-                    }
-                },
-                actions = {
-                    // Test button - apply extreme bass boost to verify EQ works
-                    TextButton(onClick = {
-                        EqManager.setBandGain(0, 12f)  // 31Hz +12dB
-                        EqManager.setBandGain(1, 10f)  // 62Hz +10dB
-                    }) {
-                        Text(stringResource(R.string.eq_test), fontSize = 13.sp)
-                    }
-                    // Preset selector
-                    TextButton(onClick = { showPresets = true }) {
-                        Text(getPresetName(state.currentPreset), fontSize = 13.sp)
-                    }
-                    // Reset
-                    IconButton(onClick = { EqManager.resetToFlat() }) {
-                        Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.eq_reset))
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                )
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        // TopAppBar（只避开状态栏）
+        TopAppBar(
+            title = { Text(stringResource(R.string.eq_title)) },
+            navigationIcon = {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = stringResource(R.string.action_back))
+                }
+            },
+            actions = {
+                TextButton(onClick = {
+                    EqManager.setBandGain(0, 12f)
+                    EqManager.setBandGain(1, 10f)
+                }) {
+                    Text(stringResource(R.string.eq_test), fontSize = 13.sp)
+                }
+                TextButton(onClick = { showPresets = true }) {
+                    Text(getPresetName(state.currentPreset), fontSize = 13.sp)
+                }
+                IconButton(onClick = { EqManager.resetToFlat() }) {
+                    Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.eq_reset))
+                }
+            },
+            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = MaterialTheme.colorScheme.surface
             )
-        }
-    ) { paddingValues ->
+        )
+
+        // 内容（延伸到小白条下方）
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues)
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -94,7 +99,8 @@ fun EqScreen(onBack: () -> Unit) {
             ) {
                 Text(
                     stringResource(R.string.eq_enabled),
-                    style = MaterialTheme.typography.bodyLarge
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 Switch(
                     checked = state.isEnabled,
@@ -118,6 +124,7 @@ fun EqScreen(onBack: () -> Unit) {
             Text(
                 stringResource(R.string.eq_bands),
                 style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
             )
 
@@ -200,6 +207,9 @@ private fun EqSlider(
     valueRange: ClosedFloatingPointRange<Float>,
     onValueChange: (Float) -> Unit
 ) {
+    val haptic = LocalHapticFeedback.current
+    var lastStep by remember { mutableFloatStateOf(value) }
+
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -207,12 +217,20 @@ private fun EqSlider(
         Text(
             text = label,
             style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.width(56.dp),
             textAlign = TextAlign.End
         )
         Slider(
             value = value,
-            onValueChange = onValueChange,
+            onValueChange = { newValue ->
+                val newStep = (newValue * 2).toInt() / 2f  // 0.5dB 步进
+                if (newStep != lastStep) {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    lastStep = newStep
+                }
+                onValueChange(newValue)
+            },
             valueRange = valueRange,
             modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
             steps = 23  // 0.5 dB steps: -12 to +12 = 24 steps
@@ -220,6 +238,7 @@ private fun EqSlider(
         Text(
             text = formatDb(value),
             style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.width(40.dp),
             textAlign = TextAlign.Start
         )

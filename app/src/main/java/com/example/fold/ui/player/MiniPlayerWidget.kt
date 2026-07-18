@@ -1,6 +1,13 @@
 package com.example.fold.ui.player
 
+import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
@@ -19,16 +26,28 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.fold.R
+import top.yukonga.miuix.kmp.blur.BlurColors
+import top.yukonga.miuix.kmp.blur.BlendColorEntry
+import top.yukonga.miuix.kmp.blur.BlurBlendMode
+import top.yukonga.miuix.kmp.blur.Backdrop
+import top.yukonga.miuix.kmp.blur.highlight.Highlight
+import top.yukonga.miuix.kmp.blur.textureBlur
+import top.yukonga.miuix.kmp.shader.isRuntimeShaderSupported
 
 /**
  * 悬浮小窗播放器 — 显示在文件浏览器右下角
@@ -36,11 +55,13 @@ import com.example.fold.R
  */
 @Composable
 fun MiniPlayerFloatingWidget(
+    backdrop: Backdrop,
     onOpenPlayer: () -> Unit,
     onTogglePlay: () -> Unit,
     onClose: () -> Unit,
 ) {
     val miniState by MiniPlayerState.state.collectAsState()
+    val blurEnabled = isRuntimeShaderSupported() && Build.VERSION.SDK_INT >= 33
 
     AnimatedVisibility(
         visible = miniState.filePath.isNotEmpty(),
@@ -51,25 +72,70 @@ fun MiniPlayerFloatingWidget(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.BottomEnd
         ) {
+            val blurColors = BlurColors(
+                blendColors = listOf(
+                    BlendColorEntry(
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                        mode = BlurBlendMode.SrcOver
+                    )
+                ),
+                brightness = 0f,
+                contrast = 1f,
+                saturation = 1f
+            )
+
             Row(
                 modifier = Modifier
                     .padding(end = 16.dp, bottom = 80.dp)
                     .clip(RoundedCornerShape(28.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f))
+                    .then(
+                        if (blurEnabled) {
+                            Modifier.textureBlur(
+                                backdrop = backdrop,
+                                shape = RoundedCornerShape(28.dp),
+                                blurRadius = 10f,
+                                colors = blurColors,
+                                highlight = Highlight.GlassStrokeMiddleLight
+                            )
+                        } else {
+                            Modifier.background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f))
+                        }
+                    )
                     .clickable { onOpenPlayer() }
                     .padding(start = 6.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                // 左侧圆形封面
+                // 左侧圆形封面（播放时缓慢旋转，暂停时停在当前位置）
                 val art = miniState.albumArt
+                val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition(label = "rotation")
+                val rotation by infiniteTransition.animateFloat(
+                    initialValue = 0f,
+                    targetValue = 360f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(durationMillis = 8000, easing = LinearEasing),
+                        repeatMode = RepeatMode.Restart
+                    ),
+                    label = "rotation"
+                )
+                var pausedRotation by remember { mutableFloatStateOf(0f) }
+                var wasPlaying by remember { mutableStateOf(false) }
+                if (wasPlaying && !miniState.isPlaying) {
+                    pausedRotation = rotation
+                }
+                wasPlaying = miniState.isPlaying
+                val currentRotation = if (miniState.isPlaying) rotation else pausedRotation
+
                 if (art != null) {
                     Image(
                         bitmap = art.asImageBitmap(),
                         contentDescription = null,
                         modifier = Modifier
                             .size(40.dp)
-                            .clip(CircleShape),
+                            .clip(CircleShape)
+                            .graphicsLayer {
+                                rotationZ = currentRotation
+                            },
                         contentScale = ContentScale.Crop
                     )
                 } else {

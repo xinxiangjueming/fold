@@ -73,6 +73,25 @@ class FileListAdapter(
         }
     }
 
+    fun forceRefreshSelection() {
+        val rv = recyclerView
+        android.util.Log.d("FileListAdapter", "forceRefreshSelection: rv=${rv != null}, childCount=${rv?.childCount ?: 0}")
+        if (rv == null) return
+        for (i in 0 until rv.childCount) {
+            val child = rv.getChildAt(i)
+            val pos = rv.getChildAdapterPosition(child)
+            if (pos >= 0 && pos < currentList.size) {
+                val holder = rv.getChildViewHolder(child)
+                if (holder is VH) {
+                    val file = currentList[pos]
+                    val isSelected = selectedFiles.contains(file.path)
+                    android.util.Log.d("FileListAdapter", "  bind[$i]: pos=$pos, file=${file.name}, selected=$isSelected, selectionMode=$selectionMode")
+                    holder.bind(file, isDark, isSelected, selectionMode, onClick, onLongPress, onToggleSelection)
+                }
+            }
+        }
+    }
+
     private var recyclerView: RecyclerView? = null
 
     override fun onAttachedToRecyclerView(rv: RecyclerView) {
@@ -132,6 +151,7 @@ class FileListAdapter(
             title.setTextColor(titleColor)
 
             if (selectionMode) {
+                android.util.Log.d("FileListAdapter", "  selectionIcon=${selectionIcon != null}, setting VISIBLE")
                 selectionIcon?.visibility = View.VISIBLE
                 selectionIcon?.setImageResource(if (isSelected) R.drawable.ic_check_circle_filled else R.drawable.ic_check_circle_outline)
                 selectionIcon?.setColorFilter(if (isSelected) 0xFF2196F3.toInt() else if (isDark) 0xFF666666.toInt() else 0xFFAAAAAA.toInt())
