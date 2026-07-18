@@ -123,7 +123,7 @@ class MainActivity : AppCompatActivity() {
         if (!isStealthResume) {
             val savedRoute = savedInstanceState?.getString("current_route")
                 ?: getSharedPreferences("nav_state", MODE_PRIVATE).getString("current_route", null)
-            val restorableRoutes = listOf("file_browser", "calculator", "hidden_apps", "trash", "eq")
+            val restorableRoutes = emptyList<String>()
             if (savedRoute != null && savedRoute in restorableRoutes) {
                 FoldLogger.i(TAG, "onCreate: restoring route=$savedRoute")
                 pendingRestoreRoute.value = savedRoute
@@ -134,7 +134,7 @@ class MainActivity : AppCompatActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         val route = currentNavRoute
-        val restorableRoutes = listOf("file_browser", "calculator", "hidden_apps", "trash", "eq")
+        val restorableRoutes = emptyList<String>()
         if (route != null && route in restorableRoutes) {
             outState.putString("current_route", route)
             FoldLogger.d(TAG, "onSaveInstanceState: saved route=$route")

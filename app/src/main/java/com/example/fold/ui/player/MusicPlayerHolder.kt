@@ -12,6 +12,7 @@ import androidx.media3.session.MediaSession
 import com.example.fold.audio.AudioFormat
 import com.example.fold.audio.DspRenderersFactory
 import com.example.fold.audio.UsbAudioDevice
+import com.example.fold.audio.UsbAudioDeviceManager
 import com.example.fold.audio.UsbAudioDeviceInfo
 import com.example.fold.audio.UsbAudioStream
 import com.example.fold.audio.UsbExclusiveRenderersFactory
@@ -21,21 +22,21 @@ object MusicPlayerHolder {
 
     private const val TAG = "MusicPlayerHolder"
 
-    var exoPlayer: ExoPlayer? = null
+    @Volatile var exoPlayer: ExoPlayer? = null
         private set
-    var mediaSession: MediaSession? = null
+    @Volatile var mediaSession: MediaSession? = null
         private set
-    var playlist: List<String> = emptyList()
+    @Volatile var playlist: List<String> = emptyList()
         private set
-    var lastFilePath: String = ""
+    @Volatile var lastFilePath: String = ""
 
-    var usbDeviceInfo: UsbAudioDeviceInfo? = null
+    @Volatile var usbDeviceInfo: UsbAudioDeviceInfo? = null
         private set
-    var usbStream: UsbAudioStream? = null
+    @Volatile var usbStream: UsbAudioStream? = null
         private set
-    var exclusiveDevice: UsbAudioDevice? = null
+    @Volatile var exclusiveDevice: UsbAudioDevice? = null
         private set
-    var exclusiveFormat: AudioFormat? = null
+    @Volatile var exclusiveFormat: AudioFormat? = null
         private set
     var isExclusiveMode = mutableStateOf(false)
         private set
@@ -67,12 +68,82 @@ object MusicPlayerHolder {
     private fun buildExclusivePlayer(context: Context): ExoPlayer {
         val stream = usbStream!!
         val info = usbDeviceInfo
-        val renderersFactory = UsbExclusiveRenderersFactory(context.applicationContext, stream, info)
+        val renderersFactory = UsbExclusiveRenderersFactory(
+            context.applicationContext, stream, info,
+            onStreamStopped = { handleStreamStopped(context) }
+        )
         val player = ExoPlayer.Builder(context.applicationContext)
             .setRenderersFactory(renderersFactory)
             .build()
         player.volume = 0f
         return player
+    }
+
+    /** Called when native USB stream stops due to ENOENT. Recreates the stream. */
+    private fun handleStreamStopped(context: Context) {
+        android.util.Log.w(TAG, "USB stream stopped — recreating")
+        try {
+            val oldStream = usbStream ?: return
+            val oldInfo = usbDeviceInfo ?: return
+            val format = exclusiveFormat ?: return
+            val device = exclusiveDevice ?: return
+
+            val positionMs = exoPlayer?.currentPosition ?: 0L
+            val wasPlaying = exoPlayer?.playWhenReady ?: false
+
+            // Release old stream
+            try { oldStream.release() } catch (_: Exception) {}
+            usbStream = null
+
+            // Close old UsbDeviceConnection to release kernel usb_device
+            try {
+                oldInfo.connection.close()
+                android.util.Log.i(TAG, "Closed old UsbDeviceConnection")
+            } catch (e: Exception) {
+                android.util.Log.w(TAG, "Failed to close old connection: ${e.message}")
+            }
+
+            // Reopen device to get fresh connection and fd
+            val newInfo = UsbAudioDeviceManager.openAndInit(device, context)
+            if (newInfo == null) {
+                android.util.Log.e(TAG, "Failed to reopen USB device")
+                disableExclusiveMode(context)
+                return
+            }
+            usbDeviceInfo = newInfo
+
+            // Create new stream with fresh connection
+            val newStream = UsbAudioStream.create(newInfo, format.sampleRate, format.channels, format.bitDepth)
+            if (newStream == null) {
+                android.util.Log.e(TAG, "Failed to recreate USB stream")
+                disableExclusiveMode(context)
+                return
+            }
+            usbStream = newStream
+
+            // Rebuild player with new stream
+            exoPlayer?.release()
+            exoPlayer = buildExclusivePlayer(context)
+            exoPlayer?.volume = 0f
+
+            // Resume playback from saved position
+            if (playlist.isNotEmpty()) {
+                val player = exoPlayer!!
+                player.clearMediaItems()
+                playlist.forEach { path ->
+                    player.addMediaItem(MediaItem.fromUri(android.net.Uri.parse("file://$path")))
+                }
+                player.repeatMode = Player.REPEAT_MODE_OFF
+                player.prepare()
+                player.seekTo(positionMs.coerceAtLeast(0))
+                player.playWhenReady = wasPlaying
+            }
+
+            android.util.Log.i(TAG, "USB stream recreated with new fd=${newInfo.fd}, resumed from ${positionMs}ms")
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "handleStreamStopped failed: ${e.message}")
+            disableExclusiveMode(context)
+        }
     }
 
     fun enableExclusiveMode(
@@ -144,11 +215,15 @@ object MusicPlayerHolder {
     fun release(context: Context) {
         mediaSession?.release()
         mediaSession = null
+        // Stop player FIRST — triggers sink.release() which drains + releases stream
         exoPlayer?.release()
         exoPlayer = null
         playlist = emptyList()
-        usbStream?.drain()
-        usbStream?.release()
+        // Safety: drain + release stream if sink didn't (idempotent)
+        try {
+            usbStream?.drain()
+            usbStream?.release()
+        } catch (_: Exception) {}
         usbStream = null
         usbDeviceInfo = null
         isExclusiveMode.value = false

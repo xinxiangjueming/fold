@@ -291,27 +291,5 @@ class WebDavHandler(private val rootDir: File) {
             .replace("'", "&apos;")
     }
 
-    private fun getMimeType(fileName: String): String {
-        return when {
-            fileName.endsWith(".html", true) -> "text/html"
-            fileName.endsWith(".css", true) -> "text/css"
-            fileName.endsWith(".js", true) -> "application/javascript"
-            fileName.endsWith(".json", true) -> "application/json"
-            fileName.endsWith(".txt", true) -> "text/plain"
-            fileName.endsWith(".xml", true) -> "application/xml"
-            fileName.endsWith(".pdf", true) -> "application/pdf"
-            fileName.endsWith(".jpg", true) || fileName.endsWith(".jpeg", true) -> "image/jpeg"
-            fileName.endsWith(".png", true) -> "image/png"
-            fileName.endsWith(".gif", true) -> "image/gif"
-            fileName.endsWith(".webp", true) -> "image/webp"
-            fileName.endsWith(".mp4", true) -> "video/mp4"
-            fileName.endsWith(".mkv", true) -> "video/x-matroska"
-            fileName.endsWith(".mp3", true) -> "audio/mpeg"
-            fileName.endsWith(".flac", true) -> "audio/flac"
-            fileName.endsWith(".wav", true) -> "audio/wav"
-            fileName.endsWith(".zip", true) -> "application/zip"
-            fileName.endsWith(".7z", true) -> "application/x-7z-compressed"
-            else -> "application/octet-stream"
-        }
-    }
+    private fun getMimeType(fileName: String): String = MimeTypes.getMimeType(fileName)
 }

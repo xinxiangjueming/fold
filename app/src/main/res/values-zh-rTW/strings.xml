@@ -121,11 +121,14 @@
 
     <!-- 播放器 -->
     <string name="audio_player_title">音樂播放</string>
-    <string name="sleep_timer_title">睡眠定時</string>
+    <string name="sleep_timer_title">定時播放</string>
     <string name="sleep_timer_minutes">%1$d 分鐘後停止</string>
     <string name="sleep_timer_finish_song">播完當前歌曲再暫停</string>
     <string name="sleep_timer_waiting">等待歌曲結束</string>
     <string name="sleep_timer_cancel">取消定時</string>
+    <string name="sleep_timer_custom">自訂時長</string>
+    <string name="sleep_timer_custom_title">設定時長</string>
+    <string name="sleep_timer_remaining">剩餘</string>
     <string name="equalizer_title">均衡器</string>
     <string name="equalizer_off">關閉均衡器</string>
     <string name="equalizer_not_available">裝置不支援均衡器</string>

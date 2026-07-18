@@ -1,8 +1,10 @@
 package com.example.fold
 
 import android.app.Application
+import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.os.Build
 import android.os.SystemClock
 import com.example.fold.audio.EqManager
 import com.example.fold.data.manager.AppHider
@@ -21,19 +23,22 @@ class FoldApp : Application() {
         val t3 = SystemClock.elapsedRealtime()
 
         // 监听应用安装/卸载，自动刷新隐藏应用缓存
-        registerReceiver(
-            object : android.content.BroadcastReceiver() {
-                override fun onReceive(context: android.content.Context?, intent: Intent?) {
-                    AppHider.invalidateCache()
-                }
-            },
-            IntentFilter().apply {
-                addAction(Intent.ACTION_PACKAGE_ADDED)
-                addAction(Intent.ACTION_PACKAGE_REMOVED)
-                addAction(Intent.ACTION_PACKAGE_REPLACED)
-                addDataScheme("package")
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: android.content.Context?, intent: Intent?) {
+                AppHider.invalidateCache()
             }
-        )
+        }
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_PACKAGE_ADDED)
+            addAction(Intent.ACTION_PACKAGE_REMOVED)
+            addAction(Intent.ACTION_PACKAGE_REPLACED)
+            addDataScheme("package")
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(receiver, filter)
+        }
 
         FoldLogger.i("Fold_Startup", "Application.onCreate: super=${t1-t0}ms, AppContainer=${t2-t1}ms, Shizuku=${t3-t2}ms, total=${t3-t0}ms")
     }

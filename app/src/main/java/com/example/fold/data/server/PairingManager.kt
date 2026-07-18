@@ -2,11 +2,12 @@ package com.example.fold.data.server
 
 import android.content.Context
 import android.content.SharedPreferences
+import java.util.concurrent.ConcurrentHashMap
 
 class PairingManager(context: Context) {
 
     private val prefs: SharedPreferences = context.getSharedPreferences("pairing", Context.MODE_PRIVATE)
-    private val pendingDevices = mutableMapOf<String, Pair<String, Long>>()
+    private val pendingDevices = ConcurrentHashMap<String, Pair<String, Long>>()
     private val pendingTimeoutMs = 5 * 60 * 1000L
 
     fun generatePairingCode(ip: String): String {

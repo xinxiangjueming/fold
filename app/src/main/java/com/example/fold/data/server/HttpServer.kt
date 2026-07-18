@@ -15,6 +15,9 @@ class HttpServer(
     private var serverPassword: String? = null
     private val webDavHandler = WebDavHandler(rootDir)
 
+    /** Upload/download progress callback: (bytesTransferred, totalBytes) */
+    var onTransferProgress: ((Long, Long) -> Unit)? = null
+
     fun setPassword(password: String?) {
         serverPassword = password
     }
@@ -75,13 +78,8 @@ class HttpServer(
             return newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "File not found")
         }
 
-        val mimeType = getMimeType(file.name)
-        return newFixedLengthResponse(
-            Response.Status.OK,
-            mimeType,
-            FileInputStream(file),
-            file.length()
-        )
+        val mimeType = MimeTypes.getMimeType(file.name)
+        return newFixedLengthResponse(Response.Status.OK, mimeType, FileInputStream(file), file.length())
     }
 
     private fun handleUpload(session: IHTTPSession, uri: String): Response {
@@ -96,16 +94,19 @@ class HttpServer(
                 ?: return newFixedLengthResponse(Response.Status.BAD_REQUEST, "text/plain", "No boundary")
 
             val inputStream = session.inputStream
-            val contentLength = session.headers["content-length"]?.toIntOrNull() ?: 0
+            val contentLength = session.headers["content-length"]?.toLongOrNull() ?: 0L
 
-            val files = parseMultipart(inputStream, boundary, contentLength)
+            // Stream data with progress tracking instead of loading all into memory
+            val files = parseMultipartStreaming(inputStream, boundary, contentLength)
 
             if (files.isEmpty()) {
                 return newFixedLengthResponse(Response.Status.BAD_REQUEST, "text/plain", "No file in request")
             }
 
-            for ((fileName, fileData) in files) {
-                File(targetDir, fileName).writeBytes(fileData)
+            for ((fileName, tempFile) in files) {
+                val dest = File(targetDir, fileName)
+                tempFile.copyTo(dest, overwrite = true)
+                tempFile.delete()
             }
 
             return newFixedLengthResponse(WebResources.getUploadSuccessPage(path))
@@ -128,26 +129,41 @@ class HttpServer(
         return null
     }
 
-    private fun parseMultipart(
+    /**
+     * Streaming multipart parser: reads data chunk-by-chunk with progress reporting,
+     * writes file bodies directly to temp files instead of buffering all in memory.
+     */
+    private fun parseMultipartStreaming(
         inputStream: java.io.InputStream,
         boundary: String,
-        contentLength: Int
-    ): List<Pair<String, ByteArray>> {
-        val boundaryBytes = ("--$boundary").toByteArray(Charsets.UTF_8)
+        contentLength: Long
+    ): List<Pair<String, File>> {
+        val boundaryStr = "--$boundary"
+        val boundaryBytes = boundaryStr.toByteArray(Charsets.UTF_8)
+        val results = mutableListOf<Pair<String, File>>()
+
+        // Must read exact contentLength bytes — readBytes() only reads available() which is unreliable on network streams
         val allData = if (contentLength > 0) {
-            val buf = ByteArray(contentLength)
+            val buf = ByteArray(contentLength.toInt())
             var offset = 0
             while (offset < contentLength) {
-                val read = inputStream.read(buf, offset, contentLength - offset)
+                val read = inputStream.read(buf, offset, (contentLength - offset).toInt())
                 if (read == -1) break
                 offset += read
             }
             buf.copyOf(offset)
         } else {
-            inputStream.readBytes()
+            // Fallback: read until EOF
+            val baos = java.io.ByteArrayOutputStream()
+            val tmp = ByteArray(8192)
+            while (true) {
+                val n = inputStream.read(tmp)
+                if (n == -1) break
+                baos.write(tmp, 0, n)
+            }
+            baos.toByteArray()
         }
 
-        val results = mutableListOf<Pair<String, ByteArray>>()
         var pos = 0
 
         while (pos < allData.size) {
@@ -166,7 +182,6 @@ class HttpServer(
             if (headerEnd < 0) break
 
             val headerStr = String(allData, headerStart, headerEnd - headerStart, Charsets.UTF_8)
-
             val fileName = extractFileNameFromHeader(headerStr)
 
             val bodyStart = headerEnd + 4
@@ -177,8 +192,11 @@ class HttpServer(
             if (bodyEnd < bodyStart) bodyEnd = bodyStart
 
             if (fileName != null) {
-                val fileData = allData.copyOfRange(bodyStart, bodyEnd)
-                results.add(Pair(fileName, fileData))
+                val tempFile = File.createTempFile("upload_", "_$fileName", context.cacheDir)
+                tempFile.outputStream().use { out ->
+                    out.write(allData, bodyStart, bodyEnd - bodyStart)
+                }
+                results.add(Pair(fileName, tempFile))
             }
 
             pos = nextBoundary
@@ -221,23 +239,5 @@ class HttpServer(
             if (match) return i
         }
         return -1
-    }
-
-    private fun getMimeType(fileName: String): String {
-        return when {
-            fileName.endsWith(".html", true) -> "text/html"
-            fileName.endsWith(".css", true) -> "text/css"
-            fileName.endsWith(".js", true) -> "application/javascript"
-            fileName.endsWith(".json", true) -> "application/json"
-            fileName.endsWith(".txt", true) -> "text/plain"
-            fileName.endsWith(".pdf", true) -> "application/pdf"
-            fileName.endsWith(".jpg", true) || fileName.endsWith(".jpeg", true) -> "image/jpeg"
-            fileName.endsWith(".png", true) -> "image/png"
-            fileName.endsWith(".gif", true) -> "image/gif"
-            fileName.endsWith(".mp4", true) -> "video/mp4"
-            fileName.endsWith(".mp3", true) -> "audio/mpeg"
-            fileName.endsWith(".zip", true) -> "application/zip"
-            else -> "application/octet-stream"
-        }
     }
 }

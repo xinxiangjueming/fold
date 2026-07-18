@@ -22,7 +22,7 @@ import java.util.Locale
  * 监听 ACTION_USB_DEVICE_ATTACHED，检测到 USB Audio 设备后：
  * 1. 打开设备读取原始描述符
  * 2. 解析 UAC1/UAC2 接口信息
- * 3. 写入 /storage/emulated/0/fold/usb-HH:mm:ss 文件
+ * 3. 写入 /storage/emulated/0/fold/usb-HH:mm:ss.SSS 文件
  */
 object UsbAttachLogger {
 
@@ -31,7 +31,7 @@ object UsbAttachLogger {
     private const val ACTION_USB_PERMISSION_LOG = "com.example.fold.USB_PERMISSION_LOG"
     private const val LOG_DIR = "/storage/emulated/0/fold"
 
-    private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.US)
+    private val timeFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
 
     /**
      * 初始化：仅记录日志，USB_DEVICE_ATTACHED 通过 manifest receiver 接收
@@ -404,6 +404,37 @@ object UsbAttachLogger {
     }
 
     private fun StringBuilder.appendNote(note: String): StringBuilder = this.appendLine(note)
+
+    /**
+     * Export full USB exclusive mode diagnostics to file.
+     * Called from UI or programmatically after playback starts.
+     */
+    fun exportDiagnostics(context: Context): String? {
+        val content = UsbExclusiveDiagnostics.collect(context)
+        val fileName = "usb-diag-${timeFormat.format(Date())}"
+
+        // Try external directory first, fall back to app files dir
+        val candidates = listOf(
+            File(LOG_DIR),
+            File(context.filesDir, "diagnostics"),
+        )
+        for (dir in candidates) {
+            try {
+                if (!dir.exists()) dir.mkdirs()
+                val file = File(dir, fileName)
+                file.writeText(content)
+                val path = file.absolutePath
+                Log.i(TAG, "Diagnostics exported: $path")
+                FoldLogger.i(TAG, "USB diagnostics export: $path, size=${content.length}")
+                return path
+            } catch (e: Exception) {
+                Log.w(TAG, "Export to ${dir.absolutePath} failed: ${e.message}")
+            }
+        }
+        Log.e(TAG, "Export diagnostics failed: all paths rejected")
+        FoldLogger.e(TAG, "Export USB diagnostics failed: all paths rejected")
+        return null
+    }
 
     // ===================== 文件写入 =====================
 

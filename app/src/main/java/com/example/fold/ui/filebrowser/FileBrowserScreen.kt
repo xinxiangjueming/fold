@@ -34,6 +34,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.PopupProperties
 import androidx.core.view.doOnNextLayout
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -881,7 +882,8 @@ fun FileBrowserScreen(
                 val file = menuTargetFile!!
                 androidx.compose.ui.window.Popup(
                     alignment = Alignment.Center,
-                    onDismissRequest = { menuTargetFile = null }
+                    onDismissRequest = { menuTargetFile = null },
+                    properties = PopupProperties(focusable = true)
                 ) {
                     Card(
                         modifier = Modifier.fillMaxWidth(0.85f),

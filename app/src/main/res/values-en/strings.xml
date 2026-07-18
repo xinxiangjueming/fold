@@ -19,11 +19,14 @@
 
     <!-- Player -->
     <string name="audio_player_title">Music Player</string>
-    <string name="sleep_timer_title">Sleep Timer</string>
+    <string name="sleep_timer_title">Schedule Play</string>
     <string name="sleep_timer_minutes">Stop after %1$d min</string>
     <string name="sleep_timer_finish_song">Finish current song first</string>
     <string name="sleep_timer_waiting">Waiting for song</string>
     <string name="sleep_timer_cancel">Cancel Timer</string>
+    <string name="sleep_timer_custom">Custom Duration</string>
+    <string name="sleep_timer_custom_title">Set Duration</string>
+    <string name="sleep_timer_remaining">remaining</string>
     <string name="equalizer_title">Equalizer</string>
     <string name="equalizer_off">Equalizer Off</string>
     <string name="equalizer_not_available">Equalizer not available</string>

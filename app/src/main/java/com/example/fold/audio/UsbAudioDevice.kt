@@ -21,6 +21,7 @@ data class AudioFormat(val sampleRate: Int, val bitDepth: Int, val channels: Int
 
 data class UsbAudioDeviceInfo(
     val connection: UsbDeviceConnection,
+    val device: UsbDevice,
     val fd: Int,
     val deviceName: String,
     val interfaceId: Int,
@@ -155,6 +156,7 @@ object UsbAudioDeviceManager {
 
         return UsbAudioDeviceInfo(
             connection = connection,
+            device = device.usbDevice,
             fd = connection.fileDescriptor,
             deviceName = device.productName,
             interfaceId = interfaceId,
@@ -392,16 +394,16 @@ object UsbAudioDeviceManager {
     fun readClockValid(connection: UsbDeviceConnection, csId: Int): Boolean {
         val data = ByteArray(1)
         val result = connection.controlTransfer(
-            0xA1, 0x81, 0x0100,
+            0xA1, 0x81, 0x0200, // GET_CUR, selector 0x02 = CLOCK_VALID_CONTROL
             (csId shl 8), // Clock source is on AudioControl interface 0
             data, data.size, 1000
         )
         if (result < 0) {
-            Log.w(TAG, "GET_CUR clock valid failed: $result")
+            Log.w(TAG, "GET_CUR CLOCK_VALID failed: result=$result, csId=$csId")
             return false
         }
         val valid = (data[0].toInt() and 0x01) != 0
-        Log.i(TAG, "Clock valid=$valid (byte=0x${data[0].toString(16)})")
+        Log.i(TAG, "CLOCK_VALID: csId=$csId, raw=0x${data[0].toString(16)}, valid=$valid")
         return valid
     }
 

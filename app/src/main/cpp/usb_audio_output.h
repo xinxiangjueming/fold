@@ -39,6 +39,20 @@ struct UsbAudioContext {
     double frameAccumulator;
     double calibratedFpmf;
 
+    // Transfer statistics
+    int64_t  urbCompleteCount;
+    int64_t  isoPacketTotal;
+    int64_t  isoPacketErrors;
+    int64_t  audioIsoPacketTotal;
+    int64_t  audioIsoPacketErrors;
+    int64_t  feedbackPacketCount;
+    int64_t  urbSubmitFailures;
+    int64_t  urbReapFailures;
+    int64_t  pcmUnderruns;
+    int64_t  pcmUnderrunBytes;
+    int      lastTransferErrorCode;
+    int      lastTransferErrorSource; // 0=none, 1=submit, 2=reap, 3=timeout
+
     // Single large buffer for residual + conversion (avoids heap fragmentation)
     uint8_t *workBuffer;       // 256KB, allocated once
     int      residualBytes;    // bytes stored at workBuffer[0..residualBytes-1]
@@ -49,6 +63,11 @@ struct UsbAudioContext {
     void    *feedbackUrb;
     uint8_t  feedbackBuffer[4];
     bool     feedbackInFlight;
+
+    // Recovery state
+    int      recoveryCount;
+    int      maxRecoveryAttempts;
+    bool     recovering;
 };
 
 void submitPcmToUrbs(UsbAudioContext *ctx, const uint8_t *pcmData, int byteCount);

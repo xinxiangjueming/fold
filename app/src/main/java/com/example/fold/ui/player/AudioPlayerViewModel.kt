@@ -36,7 +36,7 @@ data class MusicUiState(
     val currentLyricIndex: Int = -1,
     val showLyrics: Boolean = false,
     val sleepMinutes: Int = 0,
-    val sleepRemaining: Int = 0,    // >0 倒计时, -1=等待歌曲结束, 0=关闭
+    val sleepRemaining: Int = 0,    // >0 秒, -1=等待歌曲结束, 0=关闭
     val sleepFinishSong: Boolean = false,
     val audioSessionId: Int = -1,
     val playlistPaths: List<String> = emptyList(),
@@ -331,13 +331,13 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
     fun setSleep(minutes: Int, finishSong: Boolean = false) {
         _state.value = _state.value.copy(
             sleepMinutes = minutes,
-            sleepRemaining = minutes,
+            sleepRemaining = minutes * 60,  // 转成秒
             sleepFinishSong = finishSong
         )
         viewModelScope.launch {
-            var remaining = minutes
+            var remaining = minutes * 60  // 秒
             while (remaining > 0 && isActive) {
-                delay(60000)
+                delay(1000)  // 每秒更新
                 remaining--
                 _state.value = _state.value.copy(sleepRemaining = remaining)
             }

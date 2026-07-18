@@ -20,6 +20,10 @@
 #define USBDEVFS_URB_ISO_ASAP 0x02
 #endif
 
+#ifndef USBDEVFS_GETCAPABILITIES
+#define USBDEVFS_GETCAPABILITIES _IOR('U', 26, __u32)
+#endif
+
 #define TAG "UsbAudioOutput"
 
 static FILE *gLogFile = nullptr;
@@ -28,6 +32,13 @@ static void openLogFile() {
     if (gLogFile) return;
     gLogFile = fopen("/storage/emulated/0/fold/fold.log", "a");
     if (gLogFile) setbuf(gLogFile, nullptr);
+}
+
+static void closeLogFile() {
+    if (gLogFile) {
+        fclose(gLogFile);
+        gLogFile = nullptr;
+    }
 }
 
 static void logToFile(const char *level, const char *fmt, ...) {
@@ -44,11 +55,72 @@ static void logToFile(const char *level, const char *fmt, ...) {
     va_end(args);
     fprintf(gLogFile, "\n");
     fflush(gLogFile);
+    // Close after each write to avoid holding file handle indefinitely
+    closeLogFile();
 }
 
 #define LOGI(...) do { __android_log_print(ANDROID_LOG_INFO,  TAG, __VA_ARGS__); logToFile("I", __VA_ARGS__); } while(0)
 #define LOGW(...) do { __android_log_print(ANDROID_LOG_WARN,  TAG, __VA_ARGS__); logToFile("W", __VA_ARGS__); } while(0)
 #define LOGE(...) do { __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__); logToFile("E", __VA_ARGS__); } while(0)
+
+// ── Errno classification ───────────────────────────────────────────────────
+
+static const char* errnoName(int err) {
+    switch (err) {
+        case 0:          return "OK";
+        case EPERM:      return "EPERM(1)-Operation not permitted";
+        case ENOENT:     return "ENOENT(2)-No such file or directory";
+        case ESRCH:      return "ESRCH(3)-No such process";
+        case EINTR:      return "EINTR(4)-Interrupted system call";
+        case EIO:        return "EIO(5)-Input/output error";
+        case ENXIO:      return "ENXIO(6)-No such device or address";
+        case EBADF:      return "EBADF(9)-Bad file descriptor";
+        case ENOMEM:     return "ENOMEM(11)-Out of memory";
+        case EACCES:     return "EACCES(13)-Permission denied";
+        case EFAULT:     return "EFAULT(14)-Bad address";
+        case EBUSY:      return "EBUSY(16)-Device or resource busy";
+        case EEXIST:     return "EEXIST(17)-File exists";
+        case ENODEV:     return "ENODEV(19)-No such device";
+        case ENOTDIR:    return "ENOTDIR(20)-Not a directory";
+        case EISDIR:     return "EISDIR(21)-Is a directory";
+        case EINVAL:     return "EINVAL(22)-Invalid argument";
+        case ENOSPC:     return "ENOSPC(28)-No space left on device";
+        case EPIPE:      return "EPIPE(32)-Broken pipe";
+        // EAGAIN == EWOULDBLOCK (both are 11 on Linux)
+        case EAGAIN:     return "EAGAIN(11)-Resource temporarily unavailable";
+        case ENOTSOCK:   return "ENOTSOCK(38)-Socket operation on non-socket";
+        case ENOPROTOOPT:return "ENOPROTOOPT(42)-Protocol not available";
+        case EPROTONOSUPPORT: return "EPROTONOSUPPORT(43)-Protocol not supported";
+        case ENOTSUP:    return "ENOTSUP(95)-Operation not supported";
+        case ETIMEDOUT:  return "ETIMEDOUT(110)-Connection timed out";
+        case ENODATA:    return "ENODATA(61)-No data available";
+        default:         return "UNKNOWN";
+    }
+}
+
+static const char* ioctlCodeName(unsigned long code) {
+    if (code == USBDEVFS_SUBMITURB)      return "SUBMITURB";
+    if (code == USBDEVFS_REAPURB)        return "REAPURB";
+    if (code == USBDEVFS_REAPURBNDELAY)  return "REAPURBNDELAY";
+    if (code == USBDEVFS_DISCARDURB)     return "DISCARDURB";
+    if (code == USBDEVFS_CLAIMINTERFACE) return "CLAIMINTERFACE";
+    if (code == USBDEVFS_RELEASEINTERFACE) return "RELEASEINTERFACE";
+    if (code == USBDEVFS_SETINTERFACE)   return "SETINTERFACE";
+    if (code == USBDEVFS_IOCTL)          return "IOCTL";
+    if (code == USBDEVFS_CONTROL)        return "CONTROL";
+    return "UNKNOWN";
+}
+
+static void logUsbFdState(const char* caller, int fd, int ifId) {
+    // Check if fd is still valid by doing a no-op ioctl
+    unsigned int ifnum = (unsigned int)ifId;
+    int ret = ioctl(fd, USBDEVFS_GETCAPABILITIES, &ifnum);
+    LOGI("%s: fd=%d ifId=%d fdValid=%s errno=%d(%s)",
+         caller, fd, ifId,
+         (ret >= 0 || errno != EBADF) ? "yes" : "NO",
+         (ret < 0) ? errno : 0,
+         (ret < 0) ? errnoName(errno) : "ok");
+}
 
 // ── Float → PCM conversion (bit-perfect, matching FFmpeg's libswresample) ──
 
@@ -93,7 +165,10 @@ static void convertFloatToInt32(const float *in, int32_t *out, int sampleCount) 
 // ── Ring buffer management ────────────────────────────────────────────────
 
 static void allocRing(UsbAudioContext *ctx) {
-    if (ctx->ringAllocated) return;
+    if (ctx->ringAllocated) {
+        LOGI("allocRing: already allocated, skipping");
+        return;
+    }
     for (int i = 0; i < USB_AUDIO_NUM_URBS; i++) {
         ctx->ring[i].urb    = nullptr;
         ctx->ring[i].buffer = nullptr;
@@ -105,7 +180,10 @@ static void allocRing(UsbAudioContext *ctx) {
         ctx->ring[i].urb    = calloc(1, urbStructSize);
         ctx->ring[i].buffer = (uint8_t *)calloc(1, USB_AUDIO_URB_BUFFER_SIZE);
         if (!ctx->ring[i].urb || !ctx->ring[i].buffer) {
-            LOGE("allocRing: allocation failed at slot %d", i);
+            LOGE("allocRing: ALLOCATION FAILED at slot %d — urb=%p buffer=%p (size=%zu each)",
+                 i, ctx->ring[i].urb, ctx->ring[i].buffer, urbStructSize);
+            LOGE("allocRing: system may be low on memory, needed %d slots of %zu bytes",
+                 USB_AUDIO_NUM_URBS, urbStructSize + USB_AUDIO_URB_BUFFER_SIZE);
             for (int j = 0; j <= i; j++) {
                 free(ctx->ring[j].urb);
                 free(ctx->ring[j].buffer);
@@ -263,6 +341,12 @@ static int submitRingUrb(UsbAudioContext *ctx, const int *pktSizes, int numPacke
     struct usbdevfs_urb *urb = (struct usbdevfs_urb *)slot->urb;
     size_t clearSize = sizeof(struct usbdevfs_urb) +
                        numPackets * sizeof(struct usbdevfs_iso_packet_desc);
+
+    // Log URB slot state before clearing (for debugging double-submit)
+    if (ctx->urbsInFlight >= 70) {
+        LOGI("submitRingUrb: slot=%d urb=%p buffer=%p inflight=%d", idx, slot->urb, slot->buffer, ctx->urbsInFlight);
+    }
+
     memset(urb, 0, clearSize);
 
     urb->type              = USBDEVFS_URB_TYPE_ISO;
@@ -283,10 +367,25 @@ static int submitRingUrb(UsbAudioContext *ctx, const int *pktSizes, int numPacke
     int ret = ioctl(ctx->fd, USBDEVFS_SUBMITURB, urb);
     if (ret < 0) {
         int err = errno;
-        LOGE("submitRingUrb[%d]: SUBMITURB failed: %s (errno=%d, fd=%d, ep=0x%02X)",
-             idx, strerror(err), err, ctx->fd, ctx->endpointOut);
-        if (err == ENOENT || err == EBADF) {
-            LOGE("submitRingUrb: USB fd invalid — device may have been reset by kernel driver");
+        ctx->urbSubmitFailures++;
+        ctx->lastTransferErrorCode = err;
+        ctx->lastTransferErrorSource = 1; // submit
+        LOGE("submitRingUrb[%d]: SUBMITURB FAILED: %s (errno=%d)", idx, strerror(err), err);
+        LOGE("submitRingUrb:   fd=%d ep=0x%02X urbsInFlight=%d submitIdx=%d reapIdx=%d",
+             ctx->fd, ctx->endpointOut, ctx->urbsInFlight, ctx->submitIdx, ctx->reapIdx);
+        LOGE("submitRingUrb:   pkts=%d totalBytes=%d urbBuf=%p bufferLen=%d",
+             numPackets, totalBytes, slot->buffer, urb->buffer_length);
+        if (err == EBADF) {
+            LOGE("submitRingUrb:   >>> FD INVALID — kernel driver may have reclaimed interface");
+            logUsbFdState("submitRingUrb", ctx->fd, ctx->interfaceId);
+        } else if (err == ENODEV) {
+            LOGE("submitRingUrb:   >>> DEVICE REMOVED or reset");
+        } else if (err == EBUSY) {
+            LOGE("submitRingUrb:   >>> INTERFACE BUSY — another driver holds it");
+        } else if (err == ENOENT) {
+            LOGE("submitRingUrb:   >>> URB already unlinked or fd mismatch");
+        } else if (err == EPIPE) {
+            LOGE("submitRingUrb:   >>> STALL on endpoint 0x%02X", ctx->endpointOut);
         }
         return -1;
     }
@@ -310,15 +409,31 @@ static int reapOldestUrb(UsbAudioContext *ctx) {
 
     int retries = 0;
     while (ctx->urbsInFlight > 0 && retries < 1600) { // ~200ms timeout
+        // Log detailed state on first retry
+        if (retries == 0) {
+            LOGI("reapOldestUrb: attempting reap, submitIdx=%d reapIdx=%d inflight=%d fd=%d",
+                 ctx->submitIdx, ctx->reapIdx, ctx->urbsInFlight, ctx->fd);
+        }
         poll(&pfd, 1, 0);
         int ret = ioctl(ctx->fd, USBDEVFS_REAPURBNDELAY, &reaped);
         if (ret >= 0 && reaped != nullptr) {
             if (ctx->feedbackInFlight && reaped == (struct usbdevfs_urb *)ctx->feedbackUrb) {
                 handleFeedbackCompletion(ctx, reaped);
+                ctx->feedbackPacketCount++;
                 continue;
             }
             ctx->urbsInFlight--;
             ctx->reapIdx = (ctx->reapIdx + 1) % USB_AUDIO_NUM_URBS;
+            ctx->urbCompleteCount++;
+            // Count ISO packet errors from this URB
+            for (int p = 0; p < reaped->number_of_packets; p++) {
+                ctx->audioIsoPacketTotal++;
+                ctx->isoPacketTotal++;
+                if (reaped->iso_frame_desc[p].status != 0) {
+                    ctx->audioIsoPacketErrors++;
+                    ctx->isoPacketErrors++;
+                }
+            }
             return 0;  // success
         }
 
@@ -327,18 +442,39 @@ static int reapOldestUrb(UsbAudioContext *ctx) {
             retries++;
             continue;
         }
-        LOGW("reapOldestUrb: ioctl error: %s", strerror(errno));
+        int err = errno;
+        ctx->urbReapFailures++;
+        ctx->lastTransferErrorCode = err;
+        ctx->lastTransferErrorSource = 2; // reap
+        LOGE("reapOldestUrb: REAPURBNDELAY FAILED: %s (errno=%d)", strerror(err), err);
+        LOGE("reapOldestUrb:   fd=%d urbsInFlight=%d submitIdx=%d reapIdx=%d retries=%d",
+             ctx->fd, ctx->urbsInFlight, ctx->submitIdx, ctx->reapIdx, retries);
+        if (err == EBADF) {
+            LOGE("reapOldestUrb:   >>> FD INVALID");
+            logUsbFdState("reapOldestUrb", ctx->fd, ctx->interfaceId);
+        } else if (err == ENODEV) {
+            LOGE("reapOldestUrb:   >>> DEVICE REMOVED");
+        }
         return -1;  // error
     }
     if (retries >= 1600) {
-        LOGW("reapOldestUrb: timeout after 200ms, inflight=%d", ctx->urbsInFlight);
+        ctx->lastTransferErrorCode = ETIMEDOUT;
+        ctx->lastTransferErrorSource = 3; // timeout
+        LOGE("reapOldestUrb: TIMEOUT after 200ms (%d retries)", retries);
+        LOGE("reapOldestUrb:   fd=%d urbsInFlight=%d submitIdx=%d reapIdx=%d",
+             ctx->fd, ctx->urbsInFlight, ctx->submitIdx, ctx->reapIdx);
+        logUsbFdState("reapOldestUrb", ctx->fd, ctx->interfaceId);
     }
     return -2;  // timeout
 }
 
 static void drainAllUrbs(UsbAudioContext *ctx) {
-    if (!ctx->ringAllocated || ctx->fd < 0) return;
-    LOGI("drainAllUrbs: %d URBs in flight", ctx->urbsInFlight);
+    if (!ctx->ringAllocated || ctx->fd < 0) {
+        LOGW("drainAllUrbs: skipped — ringAllocated=%s fd=%d",
+             ctx->ringAllocated ? "yes" : "no", ctx->fd);
+        return;
+    }
+    LOGI("drainAllUrbs: START — %d URBs in flight, fd=%d", ctx->urbsInFlight, ctx->fd);
 
     // Phase 1: natural reap
     struct pollfd pfd;
@@ -401,6 +537,140 @@ static void drainAllUrbs(UsbAudioContext *ctx) {
     LOGI("drainAllUrbs: done, remaining in flight: %d", ctx->urbsInFlight);
 }
 
+// ── ENOENT Recovery ────────────────────────────────────────────────────────
+
+/**
+ * Attempt to recover from ENOENT by draining URBs, releasing and re-claiming
+ * the interface, and resetting the ring buffer state.
+ * Returns true if recovery succeeded, false if we should give up.
+ */
+static bool recoverFromEnoent(UsbAudioContext *ctx) {
+    ctx->recoveryCount++;
+    if (ctx->recoveryCount > ctx->maxRecoveryAttempts) {
+        LOGE("recoverFromEnoent: max recovery attempts (%d) exceeded, giving up", ctx->maxRecoveryAttempts);
+        return false;
+    }
+
+    ctx->recovering = true;
+    LOGI("=== RECOVER START === attempt %d/%d, fd=%d ifId=%d ep=0x%02X",
+         ctx->recoveryCount, ctx->maxRecoveryAttempts, ctx->fd, ctx->interfaceId, ctx->endpointOut);
+    LOGI("recover: inflight=%d submitIdx=%d reapIdx=%d frames=%lld",
+         ctx->urbsInFlight, ctx->submitIdx, ctx->reapIdx, (long long)ctx->framesWritten);
+
+    // Log URB pointers BEFORE recovery
+    for (int i = 0; i < USB_AUDIO_NUM_URBS; i++) {
+        UrbSlot *s = &ctx->ring[i];
+        if (s->urb && s->buffer) {
+            LOGI("recover: slot[%d] urb=%p buffer=%p dataLen=%d", i, s->urb, s->buffer, s->dataLength);
+        }
+    }
+
+    // Step 1: Stop stream
+    ctx->running.store(false);
+    LOGI("recover: running=false");
+
+    // Step 2: Drain all URBs
+    LOGI("recover: drainAllUrbs start, inflight=%d", ctx->urbsInFlight);
+    drainAllUrbs(ctx);
+    LOGI("recover: drainAllUrbs done, inflight=%d", ctx->urbsInFlight);
+
+    // Step 3: Release interface
+    {
+        unsigned int ifnum = (unsigned int)ctx->interfaceId;
+        int ret = ioctl(ctx->fd, USBDEVFS_RELEASEINTERFACE, &ifnum);
+        LOGI("recover: RELEASEINTERFACE ifno=%d ret=%d errno=%d(%s)",
+             ctx->interfaceId, ret, ret < 0 ? errno : 0, ret < 0 ? strerror(errno) : "ok");
+    }
+
+    // Step 4: Wait for kernel cleanup
+    LOGI("recover: sleep 100ms");
+    usleep(100000);
+
+    // Step 5: Re-claim interface
+    {
+        unsigned int ifnum = (unsigned int)ctx->interfaceId;
+        int ret = ioctl(ctx->fd, USBDEVFS_CLAIMINTERFACE, &ifnum);
+        LOGI("recover: CLAIMINTERFACE ifno=%d ret=%d errno=%d(%s)",
+             ctx->interfaceId, ret, ret < 0 ? errno : 0, ret < 0 ? strerror(errno) : "ok");
+        if (ret < 0) {
+            ctx->recovering = false;
+            return false;
+        }
+    }
+
+    // Step 6: RESETEP
+    {
+        unsigned int ep = (unsigned int)ctx->endpointOut;
+        int ret = ioctl(ctx->fd, USBDEVFS_RESETEP, &ep);
+        LOGI("recover: RESETEP ep=0x%02X ret=%d errno=%d(%s)",
+             ctx->endpointOut, ret, ret < 0 ? errno : 0, ret < 0 ? strerror(errno) : "ok");
+    }
+
+    // Step 7: alt=0 → sleep → alt=1
+    {
+        struct usbdevfs_setinterface si;
+        si.interface = ctx->interfaceId;
+
+        si.altsetting = 0;
+        int r0 = ioctl(ctx->fd, USBDEVFS_SETINTERFACE, &si);
+        LOGI("recover: SETINTERFACE alt=0 ret=%d errno=%d(%s)",
+             r0, r0 < 0 ? errno : 0, r0 < 0 ? strerror(errno) : "ok");
+
+        LOGI("recover: sleep 200ms after alt=0");
+        usleep(200000);
+
+        si.altsetting = 1;
+        int r1 = ioctl(ctx->fd, USBDEVFS_SETINTERFACE, &si);
+        LOGI("recover: SETINTERFACE alt=1 ret=%d errno=%d(%s)",
+             r1, r1 < 0 ? errno : 0, r1 < 0 ? strerror(errno) : "ok");
+
+        LOGI("recover: sleep 200ms after alt=1");
+        usleep(200000);
+    }
+
+    // Step 8: Reset ring buffer
+    ctx->submitIdx = 0;
+    ctx->reapIdx = 0;
+    ctx->urbsInFlight = 0;
+    ctx->residualBytes = 0;
+    ctx->frameAccumulator = 0.0;
+    LOGI("recover: ring reset submitIdx=0 reapIdx=0 inflight=0");
+
+    // Step 9: Reset feedback
+    if (ctx->feedbackUrb) {
+        ctx->feedbackInFlight = false;
+    }
+
+    // Step 10: Log URB pointers AFTER recovery
+    for (int i = 0; i < USB_AUDIO_NUM_URBS; i++) {
+        UrbSlot *s = &ctx->ring[i];
+        if (s->urb && s->buffer) {
+            LOGI("recover: slot[%d] urb=%p buffer=%p (same as before)", i, s->urb, s->buffer);
+        }
+    }
+
+    // Step 11: Send 500ms silence to let device stabilize
+    ctx->running.store(true);
+    {
+        int silenceFrames = ctx->sampleRate / 2; // 500ms of silence
+        int silenceBytes = silenceFrames * ctx->bytesPerFrame;
+        if (silenceBytes > 0 && silenceBytes <= 65536) {
+            uint8_t *silence = (uint8_t *)calloc(1, silenceBytes);
+            if (silence) {
+                LOGI("recover: sending %d bytes silence (500ms) to stabilize device", silenceBytes);
+                submitPcmToUrbs(ctx, silence, silenceBytes);
+                free(silence);
+            }
+        }
+    }
+
+    // Step 12: Restart
+    ctx->recovering = false;
+
+    LOGI("=== RECOVER DONE === fd=%d", ctx->fd);
+    return true;
+}
+
 // ── Shared submitPcmToUrbs ────────────────────────────────────────────────
 
 void submitPcmToUrbs(UsbAudioContext *ctx, const uint8_t *pcmData, int byteCount) {
@@ -409,6 +679,20 @@ void submitPcmToUrbs(UsbAudioContext *ctx, const uint8_t *pcmData, int byteCount
 
     int frameSize = ctx->bytesPerFrame;
     if (frameSize <= 0) return;
+
+    // Log PCM data for first few calls after recovery
+    static int pcmLogCount = 0;
+    if (pcmLogCount < 5) {
+        int hexLen = (byteCount < 32) ? byteCount : 32;
+        char hexStr[65];
+        for (int i = 0; i < hexLen; i++) {
+            sprintf(hexStr + i * 2, "%02x", pcmData[i]);
+        }
+        hexStr[hexLen * 2] = '\0';
+        LOGI("submitPcmToUrbs: PCM[%d] bytes=%d first32hex=%s residual=%d accum=%.4f",
+             pcmLogCount, byteCount, hexStr, ctx->residualBytes, ctx->frameAccumulator);
+        pcmLogCount++;
+    }
 
     // Step 1: Merge residual from previous call + new data
     int dataLen = byteCount;
@@ -422,7 +706,10 @@ void submitPcmToUrbs(UsbAudioContext *ctx, const uint8_t *pcmData, int byteCount
             memcpy(mergedBuf, ctx->residualBuffer, ctx->residualBytes);
             memcpy(mergedBuf + ctx->residualBytes, pcmData, byteCount);
             data = mergedBuf;
+            LOGI("submitPcmToUrbs: merged residual=%d + new=%d = total=%d bytes",
+                 ctx->residualBytes, byteCount, dataLen);
         } else {
+            LOGE("submitPcmToUrbs: malloc(%d) failed, dropping residual", dataLen);
             ctx->residualBytes = 0;
         }
     }
@@ -430,12 +717,17 @@ void submitPcmToUrbs(UsbAudioContext *ctx, const uint8_t *pcmData, int byteCount
 
     // Align to frame boundary
     int alignedLen = (dataLen / frameSize) * frameSize;
+    if (alignedLen < dataLen) {
+        LOGI("submitPcmToUrbs: aligned %d -> %d bytes (%d bytes tail saved)",
+             dataLen, alignedLen, dataLen - alignedLen);
+    }
 
     // Step 2: Use fractional accumulator for variable packet sizes (like decent-player)
     double fpmf = ctx->calibratedFpmf;
     if (fpmf <= 0.0) fpmf = (double)(ctx->sampleRate) / 8000.0;
 
     int offset = 0;
+    int urbsSubmitted = 0;
     while (offset < alignedLen && ctx->running.load()) {
         // Build one URB with USB_AUDIO_PACKETS_PER_URB packets
         int pktSizes[USB_AUDIO_PACKETS_PER_URB];
@@ -468,6 +760,8 @@ void submitPcmToUrbs(UsbAudioContext *ctx, const uint8_t *pcmData, int byteCount
             if (leftover > 0 && leftover < (int)sizeof(ctx->residualBuffer)) {
                 memcpy(ctx->residualBuffer, data + offset, leftover);
                 ctx->residualBytes = leftover;
+                LOGI("submitPcmToUrbs: saved %d residual bytes (numPackets=%d < %d)",
+                     leftover, numPackets, USB_AUDIO_PACKETS_PER_URB);
             }
             break;
         }
@@ -476,13 +770,26 @@ void submitPcmToUrbs(UsbAudioContext *ctx, const uint8_t *pcmData, int byteCount
         if (ctx->urbsInFlight >= USB_AUDIO_NUM_URBS) {
             int result = reapOldestUrb(ctx);
             if (result == -2) {
-                LOGE("submitPcmToUrbs: reap timeout, inflight=%d", ctx->urbsInFlight);
+                ctx->pcmUnderruns++;
+                ctx->pcmUnderrunBytes += alignedLen - offset;
+                LOGE("submitPcmToUrbs: REAP TIMEOUT (underrun #%lld), inflight=%d, lostBytes=%d, offset=%d/%d",
+                     (long long)ctx->pcmUnderruns, ctx->urbsInFlight, alignedLen - offset, offset, alignedLen);
+                LOGE("submitPcmToUrbs:   ring state: submitIdx=%d reapIdx=%d urbsInFlight=%d",
+                     ctx->submitIdx, ctx->reapIdx, ctx->urbsInFlight);
+                logUsbFdState("submitPcmToUrbs-timeout", ctx->fd, ctx->interfaceId);
                 drainAllUrbs(ctx);
                 ctx->running.store(false);
                 free(mergedBuf);
                 return;
             } else if (result < 0) {
-                LOGE("submitPcmToUrbs: reap error, inflight=%d", ctx->urbsInFlight);
+                ctx->pcmUnderruns++;
+                ctx->pcmUnderrunBytes += alignedLen - offset;
+                LOGE("submitPcmToUrbs: REAP ERROR (underrun #%lld), inflight=%d, errno=%d(%s)",
+                     (long long)ctx->pcmUnderruns, ctx->urbsInFlight, ctx->lastTransferErrorCode,
+                     errnoName(ctx->lastTransferErrorCode));
+                LOGE("submitPcmToUrbs:   ring state: submitIdx=%d reapIdx=%d urbsInFlight=%d",
+                     ctx->submitIdx, ctx->reapIdx, ctx->urbsInFlight);
+                logUsbFdState("submitPcmToUrbs-reapError", ctx->fd, ctx->interfaceId);
                 ctx->running.store(false);
                 free(mergedBuf);
                 return;
@@ -492,14 +799,51 @@ void submitPcmToUrbs(UsbAudioContext *ctx, const uint8_t *pcmData, int byteCount
         // Copy data into ring buffer slot
         memcpy(ctx->ring[ctx->submitIdx].buffer, data + offset, urbBytes);
 
+        // Log detailed state before submit (only when inflight is high)
+        if (ctx->urbsInFlight >= 70) {
+            LOGI("submitPcmToUrbs: PRE-SUBMIT state: submitIdx=%d reapIdx=%d inflight=%d frames=%lld isoErrs=%lld/%lld",
+                 ctx->submitIdx, ctx->reapIdx, ctx->urbsInFlight,
+                 (long long)ctx->framesWritten,
+                 (long long)ctx->audioIsoPacketErrors, (long long)ctx->audioIsoPacketTotal);
+        }
+
         if (submitRingUrb(ctx, pktSizes, numPackets, urbBytes) < 0) {
-            LOGE("submitPcmToUrbs: submit failed, stopping stream");
+            ctx->pcmUnderruns++;
+            ctx->pcmUnderrunBytes += alignedLen - offset;
+
+            // ENOENT: endpoint lost from kernel — signal Java to recreate stream
+            if (ctx->lastTransferErrorCode == ENOENT && !ctx->recovering) {
+                LOGE("=== ENOENT DETECTED === fd=%d ep=0x%02X inflight=%d submitIdx=%d reapIdx=%d frames=%lld",
+                     ctx->fd, ctx->endpointOut, ctx->urbsInFlight, ctx->submitIdx, ctx->reapIdx,
+                     (long long)ctx->framesWritten);
+                LOGE("ENOENT: slot urb=%p buffer=%p",
+                     ctx->ring[ctx->submitIdx].urb, ctx->ring[ctx->submitIdx].buffer);
+                ctx->running.store(false);
+                ctx->lastTransferErrorSource = 4; // signal: recreate needed
+                free(mergedBuf);
+                return;
+            }
+
+            LOGE("submitPcmToUrbs: SUBMIT FAILED (underrun #%lld), errno=%d(%s), stopping stream",
+                 (long long)ctx->pcmUnderruns, ctx->lastTransferErrorCode,
+                 errnoName(ctx->lastTransferErrorCode));
+            logUsbFdState("submitPcmToUrbs-submitFail", ctx->fd, ctx->interfaceId);
             ctx->running.store(false);
             free(mergedBuf);
             return;
         }
+
         ctx->framesWritten += urbBytes / frameSize;
         offset += urbBytes;
+        urbsSubmitted++;
+
+        // Log first few URBs for debugging
+        if (urbsSubmitted <= 3) {
+            LOGI("submitPcmToUrbs: URB#%d submitted, %d pkts, %d bytes, "
+                 "inflight=%d, frames=%lld",
+                 urbsSubmitted, numPackets, urbBytes, ctx->urbsInFlight,
+                 (long long)ctx->framesWritten);
+        }
     }
 
     // Save any leftover bytes for the next call
@@ -563,6 +907,20 @@ Java_com_example_fold_audio_UsbAudioStream_nativeCreate(
     ctx->workBuffer = (uint8_t *)malloc(256 * 1024); // 256KB single work buffer
     ctx->residualBytes = 0;
     ctx->framesWritten   = 0;
+
+    // Initialize transfer statistics
+    ctx->urbCompleteCount      = 0;
+    ctx->isoPacketTotal        = 0;
+    ctx->isoPacketErrors       = 0;
+    ctx->audioIsoPacketTotal   = 0;
+    ctx->audioIsoPacketErrors  = 0;
+    ctx->feedbackPacketCount   = 0;
+    ctx->urbSubmitFailures     = 0;
+    ctx->urbReapFailures       = 0;
+    ctx->pcmUnderruns          = 0;
+    ctx->pcmUnderrunBytes      = 0;
+    ctx->lastTransferErrorCode = 0;
+    ctx->lastTransferErrorSource = 0;
     ctx->submitIdx       = 0;
     ctx->reapIdx         = 0;
     ctx->urbsInFlight    = 0;
@@ -575,13 +933,33 @@ Java_com_example_fold_audio_UsbAudioStream_nativeCreate(
     ctx->feedbackInFlight = false;
     memset(ctx->feedbackBuffer, 0, sizeof(ctx->feedbackBuffer));
 
+    // Initialize recovery state
+    ctx->recoveryCount = 0;
+    ctx->maxRecoveryAttempts = 3;
+    ctx->recovering = false;
+
     LOGI("nativeCreate: fd=%d ifId=%d epOut=0x%02X epFb=0x%02X rate=%d ch=%d bits=%d maxPkt=%d",
          fd, ifId, epOut, epFb, rate, ch, bits, maxPkt);
 
-    // Detach kernel driver ONLY from the streaming interface.
-    // Do NOT touch interface 0 (AudioControl) — the kernel's clock management
-    // on that interface is needed by many DACs for proper isochronous scheduling.
-    // Forcing a detach+claim on AudioControl causes ENODEV after a few seconds.
+    // Step 0: Disconnect AudioControl Interface 0 from kernel driver
+    // This allows SET_CUR / ClockValid to work (kernel snd-usb-audio holds it)
+    LOGI("nativeCreate: Step 0 — disconnecting AudioControl interface 0");
+    {
+        struct usbdevfs_ioctl cmd;
+        memset(&cmd, 0, sizeof(cmd));
+        cmd.ifno = 0; // AudioControl interface
+        cmd.ioctl_code = USBDEVFS_DISCONNECT;
+        int ret = ioctl(fd, USBDEVFS_IOCTL, &cmd);
+        if (ret >= 0) {
+            LOGI("nativeCreate: Step 0 OK — disconnected AudioControl interface 0");
+        } else {
+            int err = errno;
+            LOGI("nativeCreate: Step 0 — USBDEVFS_DISCONNECT ifno=0: %s (errno=%d, may be normal)",
+                 strerror(err), err);
+        }
+    }
+
+    // Step 1: Detach kernel driver from the streaming interface
     {
         struct usbdevfs_ioctl cmd;
         memset(&cmd, 0, sizeof(cmd));
@@ -589,31 +967,37 @@ Java_com_example_fold_audio_UsbAudioStream_nativeCreate(
         cmd.ioctl_code = USBDEVFS_DISCONNECT;
         int ret = ioctl(fd, USBDEVFS_IOCTL, &cmd);
         if (ret >= 0) {
-            LOGI("nativeCreate: detached kernel driver from interface %d", ifId);
+            LOGI("nativeCreate: Step 1 OK — detached kernel driver from interface %d", ifId);
         } else {
-            LOGW("nativeCreate: USBDEVFS_DISCONNECT ifno=%d: %s (errno=%d)", ifId, strerror(errno), errno);
+            int err = errno;
+            // ENOENT = no driver bound (normal if already unbound)
+            LOGI("nativeCreate: Step 1 — USBDEVFS_DISCONNECT ifno=%d: %s (errno=%d, may be normal)",
+                 ifId, strerror(err), err);
         }
     }
 
-    // Claim the audio streaming interface
-    unsigned int ifnum = (unsigned int)ifId;
-    int ret = ioctl(fd, USBDEVFS_CLAIMINTERFACE, &ifnum);
-    if (ret < 0) {
-        LOGE("nativeCreate: USBDEVFS_CLAIMINTERFACE ifno=%d failed: %s (errno=%d)", ifId, strerror(errno), errno);
-        delete ctx;
-        return 0;
+    // Step 2: Claim the audio streaming interface
+    LOGI("nativeCreate: Step 2 — claiming interface %d", ifId);
+    {
+        unsigned int ifnum = (unsigned int)ifId;
+        int ret = ioctl(fd, USBDEVFS_CLAIMINTERFACE, &ifnum);
+        if (ret < 0) {
+            int err = errno;
+            LOGE("nativeCreate: Step 2 FAILED — USBDEVFS_CLAIMINTERFACE ifno=%d: %s (errno=%d)",
+                 ifId, strerror(err), err);
+            if (err == EBUSY) {
+                LOGE("nativeCreate:   >>> KERNEL DRIVER STILL HOLDS INTERFACE %d", ifId);
+                LOGE("nativeCreate:   >>> Check: is another app using this USB device?");
+            } else if (err == ENODEV) {
+                LOGE("nativeCreate:   >>> DEVICE REMOVED during setup");
+            }
+            delete ctx;
+            return 0;
+        }
+        LOGI("nativeCreate: Step 2 OK — claimed interface %d", ifId);
     }
-    LOGI("nativeCreate: claimed interface %d", ifId);
 
-    // USB reset to put device in a clean state before configuration
-    ret = ioctl(fd, USBDEVFS_RESET, nullptr);
-    if (ret < 0) {
-        LOGW("nativeCreate: USBDEVFS_RESET failed: %s (errno=%d)", strerror(errno), errno);
-    } else {
-        LOGI("nativeCreate: USB device reset OK");
-        // Re-claim interfaces after reset (reset releases all claims)
-        ioctl(fd, USBDEVFS_CLAIMINTERFACE, &ifnum);
-    }
+    logUsbFdState("nativeCreate-post-claim", fd, ifId);
 
     // Allocate ring buffers and feedback URB at creation time (like decent-player)
     allocRing(ctx);
@@ -675,15 +1059,60 @@ Java_com_example_fold_audio_UsbAudioStream_nativeSetSampleRate(
     ctrl.timeout      = 1000;
     ctrl.data         = data;
 
+    LOGI("nativeSetSampleRate: SET_CUR %d Hz, csId=%d, fd=%d", rate, csId, ctx->fd);
     int ret = ioctl(ctx->fd, USBDEVFS_CONTROL, &ctrl);
     if (ret < 0) {
-        LOGE("nativeSetSampleRate: SET_CUR failed: %s", strerror(errno));
+        int err = errno;
+        LOGE("nativeSetSampleRate: SET_CUR FAILED: %s (errno=%d)", strerror(err), err);
+        LOGE("nativeSetSampleRate:   fd=%d csId=%d wValue=0x%04X wIndex=0x%04X",
+             ctx->fd, csId, ctrl.wValue, ctrl.wIndex);
+        if (err == EBUSY) {
+            LOGE("nativeSetSampleRate:   >>> EBUSY — kernel AudioControl interface not released");
+            LOGE("nativeSetSampleRate:   >>> We only disconnected interface %d (streaming), not interface 0 (AudioControl)", ctx->interfaceId);
+        }
+        logUsbFdState("nativeSetSampleRate", ctx->fd, ctx->interfaceId);
         return JNI_FALSE;
     }
     ctx->sampleRate = rate;
     ctx->calibratedFpmf = (double)rate / 8000.0;
-    LOGI("nativeSetSampleRate: %d Hz, csId=%d OK", rate, csId);
+    ctx->frameAccumulator = 0.0; // Reset accumulator on rate change
+    LOGI("nativeSetSampleRate: SET_CUR OK — %d Hz, csId=%d, newFpmf=%.6f",
+         rate, csId, ctx->calibratedFpmf);
     return JNI_TRUE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_example_fold_audio_UsbAudioStream_nativeReadClockValid(
+    JNIEnv *env, jobject thiz, jlong handle, jint csId)
+{
+    auto *ctx = reinterpret_cast<UsbAudioContext *>(handle);
+    if (!ctx || ctx->fd < 0) return JNI_FALSE;
+
+    uint8_t data[1] = {0};
+    struct usbdevfs_ctrltransfer ctrl;
+    ctrl.bRequestType = 0xA1; // CLASS | INTERFACE | IN
+    ctrl.bRequest     = 0x81; // UAC2_CS_CUR
+    ctrl.wValue       = 0x0200; // CLOCK_VALID_CONTROL << 8 (selector 0x02)
+    ctrl.wIndex       = (uint16_t)(csId << 8);
+    ctrl.wLength      = 1;
+    ctrl.timeout      = 1000;
+    ctrl.data         = data;
+
+    LOGI("nativeReadClockValid: GET_CUR CLOCK_VALID, csId=%d, fd=%d", csId, ctx->fd);
+    int ret = ioctl(ctx->fd, USBDEVFS_CONTROL, &ctrl);
+    if (ret < 0) {
+        int err = errno;
+        LOGW("nativeReadClockValid: GET_CUR FAILED: %s (errno=%d)", strerror(err), err);
+        if (err == EBUSY) {
+            LOGW("nativeReadClockValid:   >>> EBUSY — kernel AudioControl interface not released");
+        }
+        logUsbFdState("nativeReadClockValid", ctx->fd, ctx->interfaceId);
+        return JNI_FALSE;
+    }
+    // Clock valid bit is bit 0 of the first byte
+    bool valid = (data[0] & 0x01) != 0;
+    LOGI("nativeReadClockValid: csId=%d, raw=0x%02X, valid=%s", csId, data[0], valid ? "true" : "false");
+    return valid ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jboolean JNICALL
@@ -699,6 +1128,7 @@ Java_com_example_fold_audio_UsbAudioStream_nativeStart(
     ctx->urbsInFlight     = 0;
     ctx->submitIdx        = 0;
     ctx->reapIdx          = 0;
+    ctx->recoveryCount    = 0;  // Reset recovery counter on new start
 
     // Ring and feedback URB are already allocated in create
     if (!ctx->ringAllocated) {
@@ -711,26 +1141,49 @@ Java_com_example_fold_audio_UsbAudioStream_nativeStart(
     ctx->calibratedFpmf = nominalFpmf;
 
     if (ctx->endpointFeedback > 0) {
+        LOGI("nativeStart: reading initial feedback from ep=0x%02X", ctx->endpointFeedback);
         int fbResult = readFeedback(ctx);
         if (fbResult == 0 && ctx->calibratedFpmf > 0) {
-            LOGI("Start: initial feedback=%.4f fpmf (%.1f Hz), nominal=%.4f (%.1f Hz)",
+            LOGI("nativeStart: feedback OK — calibrated=%.4f fpmf (%.1f Hz), nominal=%.4f (%.1f Hz), delta=%.2f%%",
                  ctx->calibratedFpmf, ctx->calibratedFpmf * 8000.0,
-                 nominalFpmf, nominalFpmf * 8000.0);
+                 nominalFpmf, nominalFpmf * 8000.0,
+                 (ctx->calibratedFpmf - nominalFpmf) / nominalFpmf * 100.0);
         } else {
-            LOGW("Start: feedback not responding, using nominal %.4f fpmf", nominalFpmf);
+            LOGW("nativeStart: feedback FAILED (result=%d), using nominal %.4f fpmf (%.1f Hz)",
+                 fbResult, nominalFpmf, nominalFpmf * 8000.0);
             ctx->calibratedFpmf = nominalFpmf;
         }
 
         // Start continuous feedback
+        LOGI("nativeStart: starting continuous feedback on ep=0x%02X", ctx->endpointFeedback);
         submitFeedbackUrb(ctx);
+    } else {
+        LOGI("nativeStart: no feedback endpoint, using nominal fpmf=%.6f", nominalFpmf);
     }
 
     ctx->running.store(true);
 
-    LOGI("nativeStart: %dHz %dbit %dch, fpmf=%.4f feedback=%s",
+    logUsbFdState("nativeStart", ctx->fd, ctx->interfaceId);
+
+    LOGI("nativeStart: %dHz %dbit %dch, fpmf=%.6f (%.1f frames/microframe), "
+         "nominalFpmf=%.6f, endpointOut=0x%02X, maxPkt=%d, feedback=%s",
          ctx->sampleRate, ctx->bitDepth, ctx->channelCount,
-         ctx->calibratedFpmf,
+         ctx->calibratedFpmf, ctx->calibratedFpmf,
+         nominalFpmf,
+         ctx->endpointOut, ctx->maxPacketSize,
          ctx->feedbackInFlight ? "continuous" : "one-shot");
+    LOGI("nativeStart: ring=%d slots, ringAllocated=%s, urbsInFlight=%d",
+         USB_AUDIO_NUM_URBS, ctx->ringAllocated ? "yes" : "NO", ctx->urbsInFlight);
+
+    // Log expected packet sizes for debugging
+    {
+        int nominalFrames = (int)(nominalFpmf);
+        int nominalBytes = nominalFrames * ctx->bytesPerFrame;
+        int actualFrames = (int)(ctx->calibratedFpmf);
+        int actualBytes = actualFrames * ctx->bytesPerFrame;
+        LOGI("nativeStart: nominalPkt=%d bytes (%d frames), actualPkt=%d bytes (%d frames)",
+             nominalBytes, nominalFrames, actualBytes, actualFrames);
+    }
     return JNI_TRUE;
 }
 
@@ -826,10 +1279,12 @@ Java_com_example_fold_audio_UsbAudioStream_nativeFlush(
     auto *ctx = reinterpret_cast<UsbAudioContext *>(handle);
     if (!ctx) return;
 
+    // Skip if recovery is in progress
+    if (ctx->recovering) return;
+
     ctx->residualBytes    = 0;
     ctx->frameAccumulator = 0.0;
-    ctx->residualBuffer[0] = 0;  // clear residual buffer
-    LOGI("nativeFlush: residual cleared");
+    memset(ctx->residualBuffer, 0, USB_AUDIO_URB_BUFFER_SIZE);
 }
 
 JNIEXPORT jint JNICALL
@@ -865,13 +1320,14 @@ Java_com_example_fold_audio_UsbAudioStream_nativeDestroy(
         ctx->feedbackUrb = nullptr;
     }
 
-    // Release interface — may fail if device disconnected
+    // Release interfaces — may fail if device disconnected
     if (ctx->fd >= 0) {
+        // Release streaming interface
         unsigned int ifnum = (unsigned int)ctx->interfaceId;
-        int ret = ioctl(ctx->fd, USBDEVFS_RELEASEINTERFACE, &ifnum);
-        if (ret < 0) {
-            LOGW("nativeDestroy: release interface %d failed: %s (device disconnected?)", ctx->interfaceId, strerror(errno));
-        }
+        ioctl(ctx->fd, USBDEVFS_RELEASEINTERFACE, &ifnum);
+        // Release AudioControl interface 0
+        unsigned int ifnum0 = 0;
+        ioctl(ctx->fd, USBDEVFS_RELEASEINTERFACE, &ifnum0);
     }
 
     if (ctx->workBuffer) {
@@ -879,7 +1335,6 @@ Java_com_example_fold_audio_UsbAudioStream_nativeDestroy(
         ctx->workBuffer = nullptr;
     }
 
-    LOGI("nativeDestroy: context deleted, fd=%d, frames=%lld", ctx->fd, (long long)ctx->framesWritten);
     delete ctx;
 }
 
@@ -902,6 +1357,116 @@ Java_com_example_fold_audio_UsbAudioStream_nativeIsRunning(
     auto *ctx = reinterpret_cast<UsbAudioContext *>(handle);
     if (!ctx) return JNI_FALSE;
     return ctx->running.load() ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_example_fold_audio_UsbAudioStream_nativeNeedsRecreate(
+    JNIEnv *env, jobject thiz, jlong handle)
+{
+    auto *ctx = reinterpret_cast<UsbAudioContext *>(handle);
+    if (!ctx) return JNI_FALSE;
+    // lastTransferErrorSource == 4 means ENOENT detected, Java should recreate
+    return (ctx->lastTransferErrorSource == 4 && !ctx->running.load()) ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jlongArray JNICALL
+Java_com_example_fold_audio_UsbAudioStream_nativeGetStats(
+    JNIEnv *env, jobject thiz, jlong handle)
+{
+    auto *ctx = reinterpret_cast<UsbAudioContext *>(handle);
+    if (!ctx) return nullptr;
+
+    // 13 elements: urbComplete, isoTotal, isoErrors, audioIsoTotal, audioIsoErrors,
+    //              feedbackPkts, submitFails, reapFails, underruns, underrunBytes,
+    //              lastErrCode, lastErrSource, recoveryCount
+    jlongArray result = env->NewLongArray(13);
+    if (!result) return nullptr;
+
+    jlong stats[13];
+    stats[0]  = ctx->urbCompleteCount;
+    stats[1]  = ctx->isoPacketTotal;
+    stats[2]  = ctx->isoPacketErrors;
+    stats[3]  = ctx->audioIsoPacketTotal;
+    stats[4]  = ctx->audioIsoPacketErrors;
+    stats[5]  = ctx->feedbackPacketCount;
+    stats[6]  = ctx->urbSubmitFailures;
+    stats[7]  = ctx->urbReapFailures;
+    stats[8]  = ctx->pcmUnderruns;
+    stats[9]  = ctx->pcmUnderrunBytes;
+    stats[10] = ctx->lastTransferErrorCode;
+    stats[11] = ctx->lastTransferErrorSource;
+    stats[12] = ctx->recoveryCount;
+
+    env->SetLongArrayRegion(result, 0, 13, stats);
+
+    return result;
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_example_fold_audio_UsbAudioStream_nativeGetStateDump(
+    JNIEnv *env, jobject thiz, jlong handle)
+{
+    auto *ctx = reinterpret_cast<UsbAudioContext *>(handle);
+    if (!ctx) return env->NewStringUTF("no_context");
+
+    char buf[2048];
+    snprintf(buf, sizeof(buf),
+        "Native USB State:\n"
+        "  fd=%d interfaceId=%d endpointOut=0x%02X endpointFeedback=0x%02X\n"
+        "  sampleRate=%d channelCount=%d bitDepth=%d bytesPerFrame=%d maxPacketSize=%d\n"
+        "  running=%s ringAllocated=%s urbsInFlight=%d\n"
+        "  submitIdx=%d reapIdx=%d framesWritten=%lld\n"
+        "  fpmf=%.6f calibratedFpmf=%.6f frameAccumulator=%.4f\n"
+        "  residualBytes=%d workBuffer=%p\n"
+        "  feedbackUrb=%p feedbackInFlight=%s\n"
+        "  --- Transfer Statistics ---\n"
+        "  urbCompleteCount=%lld\n"
+        "  isoPacketTotal=%lld isoPacketErrors=%lld\n"
+        "  audioIsoPacketTotal=%lld audioIsoPacketErrors=%lld\n"
+        "  feedbackPacketCount=%lld\n"
+        "  urbSubmitFailures=%lld urbReapFailures=%lld\n"
+        "  pcmUnderruns=%lld pcmUnderrunBytes=%lld\n"
+        "  lastTransferErrorCode=%d(%s) lastTransferErrorSource=%d\n"
+        "  --- Recovery State ---\n"
+        "  recoveryCount=%d maxRecoveryAttempts=%d recovering=%s\n",
+        ctx->fd, ctx->interfaceId, ctx->endpointOut, ctx->endpointFeedback,
+        ctx->sampleRate, ctx->channelCount, ctx->bitDepth, ctx->bytesPerFrame, ctx->maxPacketSize,
+        ctx->running.load() ? "true" : "false",
+        ctx->ringAllocated ? "true" : "false",
+        ctx->urbsInFlight,
+        ctx->submitIdx, ctx->reapIdx, (long long)ctx->framesWritten,
+        ctx->frameAccumulator, ctx->calibratedFpmf, ctx->frameAccumulator,
+        ctx->residualBytes, ctx->workBuffer,
+        ctx->feedbackUrb, ctx->feedbackInFlight ? "true" : "false",
+        (long long)ctx->urbCompleteCount,
+        (long long)ctx->isoPacketTotal, (long long)ctx->isoPacketErrors,
+        (long long)ctx->audioIsoPacketTotal, (long long)ctx->audioIsoPacketErrors,
+        (long long)ctx->feedbackPacketCount,
+        (long long)ctx->urbSubmitFailures, (long long)ctx->urbReapFailures,
+        (long long)ctx->pcmUnderruns, (long long)ctx->pcmUnderrunBytes,
+        ctx->lastTransferErrorCode, errnoName(ctx->lastTransferErrorCode),
+        ctx->lastTransferErrorSource,
+        ctx->recoveryCount, ctx->maxRecoveryAttempts,
+        ctx->recovering ? "true" : "false");
+
+    // Dump ring buffer state for debugging
+    if (ctx->ringAllocated && ctx->urbsInFlight > 0) {
+        char *p = buf + strlen(buf);
+        int remaining = sizeof(buf) - strlen(buf);
+        int n = snprintf(p, remaining, "  --- Ring Buffer (inflight=%d) ---\n", ctx->urbsInFlight);
+        p += n; remaining -= n;
+        // Show slots near submitIdx and reapIdx
+        for (int i = 0; i < USB_AUDIO_NUM_URBS && remaining > 100; i++) {
+            UrbSlot *slot = &ctx->ring[i];
+            n = snprintf(p, remaining, "  [%02d] urb=%p buf=%p len=%d%s%s\n",
+                i, slot->urb, slot->buffer, slot->dataLength,
+                (i == ctx->submitIdx) ? " <--SUBMIT" : "",
+                (i == ctx->reapIdx) ? " <--REAP" : "");
+            p += n; remaining -= n;
+        }
+    }
+
+    return env->NewStringUTF(buf);
 }
 
 } // extern "C"

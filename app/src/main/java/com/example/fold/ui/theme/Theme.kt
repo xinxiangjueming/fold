@@ -11,6 +11,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -147,7 +149,13 @@ fun FoldTheme(
 
     CompositionLocalProvider(LocalDarkMode provides darkMode) {
         val animSpec = tween<androidx.compose.ui.graphics.Color>(300)
-        val targetColors = if (darkTheme) DarkColors else LightColors
+        // Android 12+ (API 31) 使用莫奈动态取色
+        val dynamicColorAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+        val targetColors = if (darkTheme) {
+            if (dynamicColorAvailable) dynamicDarkColorScheme(context) else DarkColors
+        } else {
+            if (dynamicColorAvailable) dynamicLightColorScheme(context) else LightColors
+        }
         val animatedColors = targetColors.copy(
             primary = animateColorAsState(targetColors.primary, animSpec, "primary").value,
             onPrimary = animateColorAsState(targetColors.onPrimary, animSpec, "onPrimary").value,

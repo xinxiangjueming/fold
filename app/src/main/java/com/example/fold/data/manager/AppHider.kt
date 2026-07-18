@@ -48,6 +48,7 @@ object AppHider {
     )
 
     /** 应用列表缓存 */
+    @Volatile
     private var cachedApps: List<AppEntry>? = null
 
     /** 标记缓存需要刷新（安装/卸载 app 时触发） */

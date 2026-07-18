@@ -902,10 +902,14 @@ class FileBrowserViewModel : ViewModel() {
             prefs.edit().remove("folder_sort_$path").putString("global_sort", mode.prefValue).apply()
         }
         _state.update { it.copy(sortMode = mode, sortFolderOnly = folderOnly, showSortDialog = false) }
-        // 重新排序当前列表
-        val sorted = sortFiles(_files.value, mode)
-        _files.value = sorted
-        _state.update { it.copy(files = sorted) }
+        // Re-sort on IO thread to avoid blocking UI with large directories
+        viewModelScope.launch {
+            val sorted = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                sortFiles(_files.value, mode)
+            }
+            _files.value = sorted
+            _state.update { it.copy(files = sorted) }
+        }
     }
 
     fun setSortFolderOnly(only: Boolean) {
@@ -1175,17 +1179,24 @@ class FileBrowserViewModel : ViewModel() {
         prefs.edit().putBoolean("trash_enabled", newValue).apply()
     }
 
-    private fun getTrashMetaFile(): File = File(getTrashDir(), "metadata.json")
+    private fun getTrashMetaFile(): File = File(getTrashDir(), "metadata.txt")
 
     private fun loadTrashMeta(): MutableMap<String, String> {
         try {
             val metaFile = getTrashMetaFile()
-            if (metaFile.exists()) {
-                val json = metaFile.readText()
+            // Also check legacy filename
+            val file = if (metaFile.exists()) metaFile else File(getTrashDir(), "metadata.json")
+            if (file.exists()) {
+                val json = file.readText()
                 val map = mutableMapOf<String, String>()
-                json.lines().filter { line -> line.contains("=") }.forEach { line ->
-                    val parts = line.split("=", limit = 2)
-                    if (parts.size == 2) map[parts[0]] = parts[1]
+                for (line in json.lines()) {
+                    if (line.isBlank()) continue
+                    // Support both tab-separated (new) and equals-separated (legacy) formats
+                    val separator = if (line.contains("\t")) "\t" else "="
+                    val idx = line.indexOf(separator)
+                    if (idx > 0) {
+                        map[line.substring(0, idx)] = line.substring(idx + separator.length)
+                    }
                 }
                 return map
             }
@@ -1195,7 +1206,7 @@ class FileBrowserViewModel : ViewModel() {
 
     private fun saveTrashMeta(meta: Map<String, String>) {
         val metaFile = getTrashMetaFile()
-        metaFile.writeText(meta.entries.joinToString("\n") { "${it.key}=${it.value}" })
+        metaFile.writeText(meta.entries.joinToString("\n") { "${it.key}\t${it.value}" })
     }
 
     private fun moveToTrash(file: File) {

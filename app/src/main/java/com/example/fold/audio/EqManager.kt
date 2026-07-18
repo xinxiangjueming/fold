@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Manages EQ state and persistence.
@@ -46,7 +47,7 @@ object EqManager {
     private val _state = MutableStateFlow(EqState())
     val state: StateFlow<EqState> = _state.asStateFlow()
 
-    private var dspEngine: DspEngine? = null
+    private val dspEngineRef = AtomicReference<DspEngine?>(null)
     private var prefs: SharedPreferences? = null
 
     val presets = mapOf(
@@ -67,9 +68,11 @@ object EqManager {
     }
 
     fun createEngine(sampleRate: Int, channelCount: Int): DspEngine? {
+        // Destroy any existing engine before creating a new one
+        dspEngineRef.getAndSet(null)?.destroy()
         val engine = DspEngine()
         if (engine.create(sampleRate, channelCount)) {
-            dspEngine = engine
+            dspEngineRef.set(engine)
             applyState(engine)
             return engine
         }
@@ -77,15 +80,14 @@ object EqManager {
     }
 
     fun destroyEngine() {
-        dspEngine?.destroy()
-        dspEngine = null
+        dspEngineRef.getAndSet(null)?.destroy()
     }
 
-    fun getEngine(): DspEngine? = dspEngine
+    fun getEngine(): DspEngine? = dspEngineRef.get()
 
     fun setEnabled(enabled: Boolean) {
         _state.value = _state.value.copy(isEnabled = enabled)
-        dspEngine?.setEqEnabled(enabled)
+        dspEngineRef.get()?.setEqEnabled(enabled)
         saveState()
     }
 
@@ -130,7 +132,7 @@ object EqManager {
     }
 
     private fun applyToEngine() {
-        val engine = dspEngine ?: return
+        val engine = dspEngineRef.get() ?: return
         val s = _state.value
         engine.setEqBands(s.bandGains, s.bassDb, s.trebleDb)
         engine.setEqEnabled(s.isEnabled)

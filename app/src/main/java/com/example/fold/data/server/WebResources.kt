@@ -55,9 +55,10 @@ object WebResources {
             val icon = if (file.isDirectory) "📁" else getFileIcon(file.name)
             val size = if (file.isDirectory) "" else formatSize(file.size)
             val link = if (file.isDirectory) "/browse${file.path}" else "/download${file.path}"
+            val downloadAttr = if (!file.isDirectory) "data-url=\"$link\" data-name=\"${file.name}\" data-size=\"${file.size}\" class=\"dl-link\"" else ""
             """
             <tr>
-                <td><a href="$link">$icon ${file.name}</a></td>
+                <td><a href="$link" $downloadAttr>$icon ${file.name}</a></td>
                 <td>$size</td>
             </tr>
             """.trimIndent()
@@ -94,9 +95,14 @@ object WebResources {
         .info h3 { color: #333; font-size: 14px; margin-bottom: 8px; }
         .info code { background: #f0f0f0; padding: 2px 6px; border-radius: 4px; font-size: 13px; word-break: break-all; }
         .upload { margin-top: 16px; background: white; padding: 16px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
-        .upload form { display: flex; gap: 8px; }
-        .upload input[type="file"] { flex: 1; }
+        .upload form { display: flex; gap: 8px; flex-wrap: wrap; }
+        .upload input[type="file"] { flex: 1; min-width: 0; }
         .upload button { padding: 10px 20px; background: #1565C0; color: white; border: none; border-radius: 8px; cursor: pointer; }
+        /* Progress bar */
+        .progress-wrap { display: none; margin-top: 12px; background: #e0e0e0; border-radius: 8px; height: 24px; position: relative; overflow: hidden; }
+        .progress-wrap.active { display: block; }
+        .progress-bar { height: 100%; background: linear-gradient(90deg, #1565C0, #7B1FA2); border-radius: 8px; transition: width 0.15s ease; width: 0%; }
+        .progress-text { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; color: #333; }
     </style>
 </head>
 <body>
@@ -114,14 +120,116 @@ object WebResources {
             $fileListHtml
         </table>
         <div class="upload">
-            <form action="/upload$path" method="POST" enctype="multipart/form-data">
-                <input type="file" name="file" multiple>
-                <button type="submit">Upload</button>
+            <form id="uploadForm" action="/upload$path" method="POST" enctype="multipart/form-data">
+                <input type="file" name="file" multiple id="fileInput">
+                <button type="submit" id="uploadBtn">Upload</button>
             </form>
+            <div class="progress-wrap" id="uploadProgress">
+                <div class="progress-bar" id="uploadBar"></div>
+                <div class="progress-text" id="uploadText">0%</div>
+            </div>
+        </div>
+        <div class="progress-wrap" id="downloadProgress">
+            <div class="progress-bar" id="downloadBar"></div>
+            <div class="progress-text" id="downloadText">Downloading...</div>
         </div>
     </div>
     <script>
         document.getElementById('davUrl').textContent = location.origin + '/dav';
+
+        // Upload with progress
+        document.getElementById('uploadForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            var form = this;
+            var fileInput = document.getElementById('fileInput');
+            if (!fileInput.files.length) return;
+            var totalSize = Array.from(fileInput.files).reduce(function(s,f){return s+f.size},0);
+            var fd = new FormData(form);
+            var xhr = new XMLHttpRequest();
+            var progWrap = document.getElementById('uploadProgress');
+            var progBar = document.getElementById('uploadBar');
+            var progText = document.getElementById('uploadText');
+            progWrap.classList.add('active');
+            xhr.upload.addEventListener('progress', function(ev) {
+                if (ev.lengthComputable) {
+                    var pct = Math.round(ev.loaded / ev.total * 100);
+                    progBar.style.width = pct + '%';
+                    progText.textContent = pct + '% (' + formatBytes(ev.loaded) + ' / ' + formatBytes(ev.total) + ')';
+                }
+            });
+            xhr.addEventListener('load', function() {
+                if (xhr.status >= 200 && xhr.status < 400) {
+                    progBar.style.width = '100%';
+                    progText.textContent = 'Upload complete!';
+                    setTimeout(function(){ location.reload(); }, 800);
+                } else {
+                    progText.textContent = 'Upload failed: ' + xhr.status;
+                    progBar.style.background = '#FF3B30';
+                }
+            });
+            xhr.addEventListener('error', function() {
+                progText.textContent = 'Upload failed (network error)';
+                progBar.style.background = '#FF3B30';
+            });
+            xhr.open('POST', form.action);
+            xhr.send(fd);
+        });
+
+        // Download with progress
+        document.querySelectorAll('.dl-link').forEach(function(link) {
+            link.addEventListener('click', function(e) {
+                e.preventDefault();
+                var url = this.getAttribute('data-url');
+                var name = this.getAttribute('data-name');
+                var totalSize = parseInt(this.getAttribute('data-size') || '0');
+                var progWrap = document.getElementById('downloadProgress');
+                var progBar = document.getElementById('downloadBar');
+                var progText = document.getElementById('downloadText');
+                progWrap.classList.add('active');
+                progBar.style.width = '0%';
+                progText.textContent = 'Downloading ' + name + '...';
+                var xhr = new XMLHttpRequest();
+                xhr.open('GET', url, true);
+                xhr.responseType = 'blob';
+                xhr.addEventListener('progress', function(ev) {
+                    if (ev.lengthComputable) {
+                        var pct = Math.round(ev.loaded / ev.total * 100);
+                        progBar.style.width = pct + '%';
+                        progText.textContent = name + ' ' + pct + '% (' + formatBytes(ev.loaded) + ' / ' + formatBytes(ev.total) + ')';
+                    }
+                });
+                xhr.addEventListener('load', function() {
+                    if (xhr.status === 200) {
+                        progBar.style.width = '100%';
+                        progText.textContent = name + ' complete!';
+                        var blob = xhr.response;
+                        var a = document.createElement('a');
+                        a.href = URL.createObjectURL(blob);
+                        a.download = name;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(a.href);
+                        setTimeout(function(){ progWrap.classList.remove('active'); }, 2000);
+                    } else {
+                        progText.textContent = 'Download failed: ' + xhr.status;
+                        progBar.style.background = '#FF3B30';
+                    }
+                });
+                xhr.addEventListener('error', function() {
+                    progText.textContent = 'Download failed (network error)';
+                    progBar.style.background = '#FF3B30';
+                });
+                xhr.send();
+            });
+        });
+
+        function formatBytes(b) {
+            if (b < 1024) return b + ' B';
+            if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
+            if (b < 1073741824) return (b/1048576).toFixed(1) + ' MB';
+            return (b/1073741824).toFixed(2) + ' GB';
+        }
     </script>
 </body>
 </html>
