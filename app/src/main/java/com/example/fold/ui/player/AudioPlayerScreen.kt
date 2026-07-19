@@ -211,23 +211,18 @@ fun AudioPlayerScreen(
 
                 Spacer(Modifier.height(8.dp))
 
-                // 功能按钮（沉浸模式隐藏，带动画）
-                AnimatedVisibility(
-                    visible = !state.isImmersive,
-                    enter = fadeIn() + expandVertically(),
-                    exit = fadeOut() + shrinkVertically()
-                ) {
-                    FeatureButtons(
-                        loopMode = state.loopMode,
-                        sleepActive = state.sleepRemaining != 0,
-                        onLoopChange = { vm.cycleLoopMode() },
-                        onSleepClick = { showSleepDialog = true },
-                        onEqualizerClick = handleEqualizerClick,
-                        onPlaylistClick = { showPlaylist = true },
-                        primaryColor = MaterialTheme.colorScheme.primary,
-                        variantColor = onSurfaceVar
-                    )
-                }
+                // 功能按钮（沉浸模式隐藏）
+                FeatureButtons(
+                    loopMode = state.loopMode,
+                    sleepActive = state.sleepRemaining != 0,
+                    onLoopChange = { vm.cycleLoopMode() },
+                    onSleepClick = { showSleepDialog = true },
+                    onEqualizerClick = handleEqualizerClick,
+                    onPlaylistClick = { showPlaylist = true },
+                    primaryColor = MaterialTheme.colorScheme.primary,
+                    variantColor = onSurfaceVar,
+                    visible = !state.isImmersive
+                )
             }
 
             // 右侧：歌词
@@ -272,13 +267,14 @@ fun AudioPlayerScreen(
             .padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // ===== TopBar（沉浸模式隐藏，带动画）=====
-        AnimatedVisibility(
-            visible = !state.isImmersive,
-            enter = fadeIn() + expandVertically(),
-            exit = fadeOut() + shrinkVertically()
-        ) {
-            TopAppBar(
+        // ===== TopBar（沉浸模式隐藏）=====
+        val topBarAlpha by androidx.compose.animation.core.animateFloatAsState(
+            targetValue = if (state.isImmersive) 0f else 1f,
+            animationSpec = androidx.compose.animation.core.tween(300),
+            label = "topBarAlpha"
+        )
+        TopAppBar(
+            modifier = Modifier.graphicsLayer { alpha = topBarAlpha },
                 title = { Text(stringResource(R.string.audio_player_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -324,7 +320,6 @@ fun AudioPlayerScreen(
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background)
             )
-        }
 
         Spacer(Modifier.weight(0.5f))
 
@@ -345,23 +340,30 @@ fun AudioPlayerScreen(
 
         Spacer(Modifier.weight(0.5f))
 
-        // ===== 曲目名 =====
-        Text(state.title, style = MaterialTheme.typography.titleMedium,
-            color = onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (state.playlistSize > 1) {
-            Text("${state.currentIndex + 1} / ${state.playlistSize}",
-                style = MaterialTheme.typography.bodySmall, color = onSurfaceVar)
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        // ===== 进度条（独立轮询，不触发整屏重组）=====
-        if (state.initialized) {
-            IndependentProgressBar(
-                exoPlayer = vm.exoPlayer,
-                duration = state.duration,
-                onSeek = { vm.seekTo(it) }
-            )
+        // ===== 曲目名 + 进度条（沉浸模式隐藏）=====
+        val contentAlpha by androidx.compose.animation.core.animateFloatAsState(
+            targetValue = if (state.isImmersive) 0f else 1f,
+            animationSpec = androidx.compose.animation.core.tween(300),
+            label = "contentAlpha"
+        )
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.graphicsLayer { alpha = contentAlpha }
+        ) {
+            Text(state.title, style = MaterialTheme.typography.titleMedium,
+                color = onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (state.playlistSize > 1) {
+                Text("${state.currentIndex + 1} / ${state.playlistSize}",
+                    style = MaterialTheme.typography.bodySmall, color = onSurfaceVar)
+            }
+            Spacer(Modifier.height(12.dp))
+            if (state.initialized) {
+                IndependentProgressBar(
+                    exoPlayer = vm.exoPlayer,
+                    duration = state.duration,
+                    onSeek = { vm.seekTo(it) }
+                )
+            }
         }
 
         Spacer(Modifier.height(12.dp))
@@ -378,23 +380,18 @@ fun AudioPlayerScreen(
 
         Spacer(Modifier.height(12.dp))
 
-        // ===== 功能按钮行（沉浸模式隐藏，带动画）=====
-        AnimatedVisibility(
-            visible = !state.isImmersive,
-            enter = fadeIn() + expandVertically(),
-            exit = fadeOut() + shrinkVertically()
-        ) {
-            FeatureButtons(
-                loopMode = state.loopMode,
-                sleepActive = state.sleepRemaining != 0,
-                onLoopChange = { vm.cycleLoopMode() },
-                onSleepClick = { showSleepDialog = true },
-                onEqualizerClick = handleEqualizerClick,
-                onPlaylistClick = { showPlaylist = true },
-                primaryColor = MaterialTheme.colorScheme.primary,
-                variantColor = onSurfaceVar
-            )
-        }
+        // ===== 功能按钮行（沉浸模式隐藏）=====
+        FeatureButtons(
+            loopMode = state.loopMode,
+            sleepActive = state.sleepRemaining != 0,
+            onLoopChange = { vm.cycleLoopMode() },
+            onSleepClick = { showSleepDialog = true },
+            onEqualizerClick = handleEqualizerClick,
+            onPlaylistClick = { showPlaylist = true },
+            primaryColor = MaterialTheme.colorScheme.primary,
+            variantColor = onSurfaceVar,
+            visible = !state.isImmersive
+        )
 
         Spacer(Modifier.weight(0.5f))
     }
@@ -757,9 +754,14 @@ private fun FeatureButtons(
     onEqualizerClick: () -> Unit,
     onPlaylistClick: () -> Unit,
     primaryColor: Color,
-    variantColor: Color
+    variantColor: Color,
+    visible: Boolean = true
 ) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+    Row(
+        Modifier.fillMaxWidth()
+            .graphicsLayer { alpha = if (visible) 1f else 0f },
+        horizontalArrangement = Arrangement.SpaceEvenly
+    ) {
         IconButton(onClick = onLoopChange) {
             Icon(
                 when (loopMode) {
