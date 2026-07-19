@@ -7,11 +7,20 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -46,6 +55,7 @@ import com.example.fold.data.model.FileItem
 import com.example.fold.ui.theme.*
 import com.example.fold.ui.theme.LocalDarkMode
 import com.example.fold.ui.theme.toggleDarkMode
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import com.example.fold.util.FoldLogger
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -80,6 +90,7 @@ fun FileBrowserScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val files by viewModel.files.collectAsStateWithLifecycle()
     val calculatorMode by viewModel.calculatorMode.collectAsStateWithLifecycle()
+    val trashEnabled by viewModel.trashEnabled.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     DisposableEffect(viewModel) {
@@ -183,12 +194,12 @@ fun FileBrowserScreen(
                         } else if (state.selectionMode) {
                             Text(
                                 text = stringResource(R.string.selected_count, state.selectedFiles.size),
-                                style = MaterialTheme.typography.titleMedium
+                                style = MiuixTheme.textStyles.main
                             )
                         } else {
                             Text(
                                 text = state.currentPath.ifEmpty { stringResource(R.string.app_name) },
-                                style = MaterialTheme.typography.titleMedium,
+                                style = MiuixTheme.textStyles.main,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -332,7 +343,13 @@ fun FileBrowserScreen(
                                     DropdownMenuItem(
                                         text = { Text(stringResource(if (calculatorMode) R.string.calculator_mode_off else R.string.calculator_mode_on)) },
                                         onClick = { showMoreMenu = false; viewModel.toggleCalculatorMode() },
-                                        leadingIcon = { Icon(Icons.Filled.Calculate, contentDescription = null) }
+                                        leadingIcon = {
+                                            Icon(
+                                                Icons.Filled.Calculate,
+                                                contentDescription = null,
+                                                tint = if (calculatorMode) MiuixSuccess else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
                                     )
                                     DropdownMenuItem(
                                         text = { Text(stringResource(R.string.http_server)) },
@@ -355,7 +372,13 @@ fun FileBrowserScreen(
                                     DropdownMenuItem(
                                         text = { Text(stringResource(R.string.trash_title)) },
                                         onClick = { showMoreMenu = false; onNavigateToTrash() },
-                                        leadingIcon = { Icon(Icons.Filled.DeleteSweep, contentDescription = null) }
+                                        leadingIcon = {
+                                            Icon(
+                                                Icons.Filled.DeleteSweep,
+                                                contentDescription = null,
+                                                tint = if (trashEnabled) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
                                     )
                                     if (state.storageVolumes.size > 1) {
                                         HorizontalDivider()
@@ -565,13 +588,21 @@ fun FileBrowserScreen(
                         },
                         update = { rv ->
                             // 切换 LayoutManager
-                            val targetLM = if (state.viewMode == ViewMode.GRID) {
-                                androidx.recyclerview.widget.GridLayoutManager(rv.context, gridColumns)
-                            } else {
-                                androidx.recyclerview.widget.LinearLayoutManager(rv.context)
+                            val currentLM = rv.layoutManager
+                            val needNewLM = when {
+                                state.viewMode == ViewMode.GRID -> {
+                                    currentLM !is androidx.recyclerview.widget.GridLayoutManager ||
+                                    currentLM.spanCount != gridColumns
+                                }
+                                else -> currentLM !is androidx.recyclerview.widget.LinearLayoutManager ||
+                                        currentLM is androidx.recyclerview.widget.GridLayoutManager
                             }
-                            if (rv.layoutManager?.javaClass != targetLM.javaClass) {
-                                rv.layoutManager = targetLM
+                            if (needNewLM) {
+                                rv.layoutManager = if (state.viewMode == ViewMode.GRID) {
+                                    androidx.recyclerview.widget.GridLayoutManager(rv.context, gridColumns)
+                                } else {
+                                    androidx.recyclerview.widget.LinearLayoutManager(rv.context)
+                                }
                             }
                             // 恢复滚动位置
                             rv.post {
@@ -584,6 +615,38 @@ fun FileBrowserScreen(
                         },
                         modifier = Modifier.fillMaxSize()
                     )
+                    // 顶部渐变遮罩 — 滚动到顶时图标平滑裁切
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        // 顶部遮罩
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(24.dp)
+                                .background(
+                                    brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                                        colors = listOf(
+                                            MaterialTheme.colorScheme.background,
+                                            androidx.compose.ui.graphics.Color.Transparent
+                                        )
+                                    )
+                                )
+                        )
+                        // 底部遮罩
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(24.dp)
+                                .align(Alignment.BottomCenter)
+                                .background(
+                                    brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                                        colors = listOf(
+                                            androidx.compose.ui.graphics.Color.Transparent,
+                                            MaterialTheme.colorScheme.background
+                                        )
+                                    )
+                                )
+                        )
+                    }
                 }
             }
 
@@ -790,7 +853,7 @@ fun FileBrowserScreen(
                         ) {
                             Text(
                                 state.compressFileName,
-                                style = MaterialTheme.typography.bodySmall,
+                                style = MiuixTheme.textStyles.footnote1,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -804,7 +867,7 @@ fun FileBrowserScreen(
                             )
                             Text(
                                 "${(state.compressProgress * 100).toInt()}%",
-                                style = MaterialTheme.typography.bodySmall,
+                                style = MiuixTheme.textStyles.footnote1,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
@@ -1040,7 +1103,7 @@ private fun SortDialog(
                     Spacer(Modifier.width(8.dp))
                     Column {
                         Text(stringResource(R.string.sort_folder_only), style = MaterialTheme.typography.bodyMedium)
-                        Text(stringResource(R.string.sort_folder_only_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(stringResource(R.string.sort_folder_only_hint), style = MiuixTheme.textStyles.footnote1, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -1066,11 +1129,11 @@ private fun HttpServerDialog(serverUrl: String, onStop: () -> Unit, onDismiss: (
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(stringResource(R.string.http_server_running), style = MaterialTheme.typography.bodyMedium)
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), shape = RoundedCornerShape(12.dp)) {
-                    Text(text = serverUrl, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+                    Text(text = serverUrl, style = MiuixTheme.textStyles.main, fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onPrimaryContainer, textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth().padding(16.dp))
                 }
-                Text(text = stringResource(R.string.http_server_hint), style = MaterialTheme.typography.bodySmall,
+                Text(text = stringResource(R.string.http_server_hint), style = MiuixTheme.textStyles.footnote1,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
             }
         },

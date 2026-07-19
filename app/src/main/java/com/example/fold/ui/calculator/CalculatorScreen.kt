@@ -12,7 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
+import top.yukonga.miuix.kmp.squircle.squircleSurface
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Functions
 import androidx.compose.material3.Icon
@@ -291,8 +291,10 @@ fun CalculatorScreen(
                 modifier = Modifier
                     .weight(weight)
                     .height(buttonHeight)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(bgColor)
+                    .squircleSurface(
+                        color = bgColor,
+                        cornerRadius = 12.dp,
+                    )
                     .clickable {
                         haptic.performHapticFeedback(HapticFeedbackType.VirtualKey)
                         onClick()
@@ -375,8 +377,10 @@ fun CalculatorScreen(
                 modifier = Modifier
                     .weight(1f)
                     .height(buttonHeight)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(if (showAdvanced) opBg.copy(alpha = 0.15f) else funcBg)
+                    .squircleSurface(
+                        color = if (showAdvanced) opBg.copy(alpha = 0.15f) else funcBg,
+                        cornerRadius = 12.dp,
+                    )
                     .clickable {
                         haptic.performHapticFeedback(HapticFeedbackType.VirtualKey)
                         showAdvanced = !showAdvanced

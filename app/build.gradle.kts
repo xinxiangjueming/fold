@@ -94,6 +94,7 @@ dependencies {
     implementation("top.yukonga.miuix.kmp:miuix-ui:0.9.2")
     implementation("top.yukonga.miuix.kmp:miuix-icons:0.9.2")
     implementation("top.yukonga.miuix.kmp:miuix-blur:0.9.2")
+    implementation("top.yukonga.miuix.kmp:miuix-squircle:0.9.2")
 
     // Navigation
     implementation("androidx.navigation:navigation-compose:2.8.5")

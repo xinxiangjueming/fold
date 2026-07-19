@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -24,6 +23,7 @@ import androidx.compose.ui.unit.sp
 import com.example.fold.R
 import com.example.fold.audio.DspEngine
 import com.example.fold.audio.EqManager
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
 private fun getPresetName(key: String): String {
@@ -176,7 +176,7 @@ fun EqScreen(onBack: () -> Unit) {
                         Spacer(Modifier.height(4.dp))
                         Text(
                             text = stringResource(R.string.eq_current_preset, getPresetName(state.currentPreset)),
-                            style = MaterialTheme.typography.bodySmall,
+                            style = MiuixTheme.textStyles.footnote1,
                             color = if (state.isEnabled)
                                 MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
                             else
@@ -216,7 +216,7 @@ private fun EqSlider(
     ) {
         Text(
             text = label,
-            style = MaterialTheme.typography.bodySmall,
+            style = MiuixTheme.textStyles.footnote1,
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.width(56.dp),
             textAlign = TextAlign.End
@@ -237,7 +237,7 @@ private fun EqSlider(
         )
         Text(
             text = formatDb(value),
-            style = MaterialTheme.typography.bodySmall,
+            style = MiuixTheme.textStyles.footnote1,
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.width(40.dp),
             textAlign = TextAlign.Start

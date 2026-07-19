@@ -28,6 +28,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.example.fold.R
 import com.example.fold.util.CharsetDetector
 import com.example.fold.util.FoldLogger
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -95,7 +96,7 @@ fun TextEditorScreen(
                     Text(
                         text = file.name + if (isModified) " *" else "",
                         maxLines = 1,
-                        style = MaterialTheme.typography.titleMedium
+                        style = MiuixTheme.textStyles.main
                     )
                 },
                 navigationIcon = {
@@ -240,8 +241,8 @@ fun TextEditorScreen(
                             modifier = Modifier.fillMaxWidth()
                         )
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("8", style = MaterialTheme.typography.bodySmall)
-                            Text("32", style = MaterialTheme.typography.bodySmall)
+                            Text("8", style = MiuixTheme.textStyles.footnote1)
+                            Text("32", style = MiuixTheme.textStyles.footnote1)
                         }
                     }
                 },

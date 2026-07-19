@@ -7,6 +7,11 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.DisposableEffect
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -20,6 +25,9 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
+import top.yukonga.miuix.kmp.squircle.squircleBackground
+import top.yukonga.miuix.kmp.squircle.squircleSurface
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.*
@@ -28,6 +36,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
@@ -163,7 +172,7 @@ fun ReaderScreen(
                     Text(
                         text = state.fileName.ifEmpty { stringResource(R.string.reader_title) },
                         maxLines = 1,
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MiuixTheme.textStyles.main,
                         color = textColor
                     )
                 },
@@ -265,7 +274,11 @@ fun ReaderScreen(
                     }
                 }
 
-                if (showSettings) {
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = showSettings,
+                    enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                    exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+                ) {
                     com.example.fold.ui.reader.ReaderSettingsPanel(
                         state = state,
                         onFontSizeChange = { viewModel.updateFontSize(it) },
@@ -285,18 +298,30 @@ fun ReaderScreen(
                     )
                 }
 
-                if (showChapterList) {
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = showChapterList,
+                    enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                    exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+                ) {
                     ChapterListSheet(
                         chapters = viewModel.getChapters(),
                         currentIndex = state.currentChapterIndex,
+                        bgColor = bgColor,
+                        textColor = textColor,
                         onSelect = { viewModel.seekToChapter(it) },
                         onDismiss = { showChapterList = false }
                     )
                 }
 
-                if (showBookmarkList) {
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = showBookmarkList,
+                    enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                    exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+                ) {
                     BookmarkListSheet(
                         bookmarks = viewModel.bookmarks.collectAsStateWithLifecycle().value,
+                        bgColor = bgColor,
+                        textColor = textColor,
                         onSelect = { viewModel.jumpToBookmark(it); showBookmarkList = false },
                         onDelete = { viewModel.deleteBookmark(it) },
                         onDismiss = { showBookmarkList = false }
@@ -337,7 +362,7 @@ fun ReaderScreen(
                         ) {
                             Text(
                                 "%.1fx".format(ttsState.speed),
-                                style = MaterialTheme.typography.labelSmall,
+                                style = MiuixTheme.textStyles.footnote2,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.width(36.dp)
                             )
@@ -591,7 +616,7 @@ private fun TxtReaderContent(
                     item(key = "title_$chapterIdx") {
                         Text(
                             text = chapters[chapterIdx].title.ifBlank { stringResource(R.string.reader_untitled_chapter, chapterIdx + 1) },
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MiuixTheme.textStyles.main,
                             fontWeight = FontWeight.Bold,
                             color = textColor,
                             modifier = Modifier.padding(bottom = 12.dp)
@@ -601,7 +626,7 @@ private fun TxtReaderContent(
                     item(key = "title_$chapterIdx") {
                         Text(
                             text = chapters[chapterIdx].title.ifBlank { stringResource(R.string.reader_untitled_chapter, chapterIdx + 1) },
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MiuixTheme.textStyles.main,
                             fontWeight = FontWeight.Bold,
                             color = textColor,
                             modifier = Modifier.padding(bottom = 12.dp)
@@ -653,7 +678,7 @@ private fun TxtReaderContent(
                     Spacer(Modifier.height(80.dp))
                     Text(
                         text = stringResource(R.string.reader_end_of_book),
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MiuixTheme.textStyles.footnote1,
                         color = textColor.copy(alpha = 0.3f),
                         modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp),
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -979,7 +1004,7 @@ private fun PdfReaderContent(
         // 页码指示
         Text(
             text = stringResource(R.string.reader_page_indicator, pagerState.currentPage + 1, totalPages),
-            style = MaterialTheme.typography.bodySmall,
+            style = MiuixTheme.textStyles.footnote1,
             color = textColor.copy(alpha = 0.5f),
             modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 8.dp)
         )
@@ -987,7 +1012,7 @@ private fun PdfReaderContent(
 }
 
 @Composable
-private fun ChapterListSheet(chapters: List<Chapter>, currentIndex: Int, onSelect: (Int) -> Unit, onDismiss: () -> Unit) {
+private fun ChapterListSheet(chapters: List<Chapter>, currentIndex: Int, bgColor: Color, textColor: Color, onSelect: (Int) -> Unit, onDismiss: () -> Unit) {
     val listState = rememberLazyListState()
     LaunchedEffect(Unit) {
         if (currentIndex > 0) listState.scrollToItem(currentIndex)
@@ -1003,6 +1028,9 @@ private fun ChapterListSheet(chapters: List<Chapter>, currentIndex: Int, onSelec
             FoldLogger.d("Fold_Scroll", "chapterList scroll END, first=${listState.firstVisibleItemIndex}, elapsed=${elapsed}ms")
         }
     }
+    // 面板背景色：根据阅读背景亮度自动选择对比色
+    val luminance = 0.299f * bgColor.red + 0.587f * bgColor.green + 0.114f * bgColor.blue
+    val panelColor = if (luminance > 0.5f) Color(0xFFE8E8E8) else Color(0xFF3A3A3A)
     // 半透明遮罩
     Box(
         modifier = Modifier
@@ -1014,11 +1042,18 @@ private fun ChapterListSheet(chapters: List<Chapter>, currentIndex: Int, onSelec
                 .fillMaxWidth()
                 .fillMaxHeight(0.6f)
                 .align(Alignment.BottomCenter)
-                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                .shadow(8.dp, RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                .squircleBackground(
+                    color = panelColor,
+                    topStart = 20.dp,
+                    topEnd = 20.dp,
+                    bottomEnd = 0.dp,
+                    bottomStart = 0.dp,
+                )
                 .padding(16.dp)
         ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(R.string.reader_chapters), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
+                    Text(stringResource(R.string.reader_chapters), style = MiuixTheme.textStyles.main, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
                     IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close), tint = MaterialTheme.colorScheme.onSurface) }
                 }
                 LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
@@ -1028,9 +1063,9 @@ private fun ChapterListSheet(chapters: List<Chapter>, currentIndex: Int, onSelec
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 2.dp)
-                                .background(
-                                    if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-                                    RoundedCornerShape(12.dp)
+                                .squircleSurface(
+                                    color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                                    cornerRadius = 12.dp,
                                 )
                                 .clickable { onSelect(index); onDismiss() }
                                 .padding(horizontal = 16.dp, vertical = 12.dp),
@@ -1052,21 +1087,29 @@ private fun ChapterListSheet(chapters: List<Chapter>, currentIndex: Int, onSelec
 @Composable
 private fun BookmarkListSheet(
     bookmarks: List<BookmarkEntry>,
+    bgColor: Color,
+    textColor: Color,
     onSelect: (BookmarkEntry) -> Unit,
     onDelete: (BookmarkEntry) -> Unit,
     onDismiss: () -> Unit
 ) {
+    // 面板背景色：根据阅读背景亮度自动选择对比色
+    val luminance = 0.299f * bgColor.red + 0.587f * bgColor.green + 0.114f * bgColor.blue
+    val panelColor = if (luminance > 0.5f) Color(0xFFE8E8E8) else Color(0xFF3A3A3A)
+    val contentColor = if (luminance > 0.5f) Color(0xFF1F1F1F) else Color(0xFFE0E0E0)
+
     Box(
         modifier = Modifier.fillMaxSize().clickable(onClick = onDismiss)
     ) {
         Card(
             modifier = Modifier.fillMaxWidth().fillMaxHeight(0.6f).align(Alignment.BottomCenter),
             shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
-            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+            colors = CardDefaults.cardColors(containerColor = panelColor, contentColor = contentColor)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(R.string.reader_bookmarks), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
+                    Text(stringResource(R.string.reader_bookmarks), style = MiuixTheme.textStyles.main, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
                     IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close), tint = MaterialTheme.colorScheme.onSurface) }
                 }
                 if (bookmarks.isEmpty()) {
@@ -1092,7 +1135,7 @@ private fun BookmarkListSheet(
                                         )
                                         Text(
                                             text = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(entry.timestamp)),
-                                            style = MaterialTheme.typography.bodySmall,
+                                            style = MiuixTheme.textStyles.footnote1,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }

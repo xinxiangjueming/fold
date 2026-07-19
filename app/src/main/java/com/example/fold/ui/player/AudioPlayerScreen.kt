@@ -29,6 +29,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import top.yukonga.miuix.kmp.squircle.squircleSurface
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
@@ -152,8 +154,10 @@ fun AudioPlayerScreen(
                             scaleX = coverScale
                             scaleY = coverScale
                         }
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(surface),
+                        .squircleSurface(
+                            color = surface,
+                            cornerRadius = 10.dp,
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
                     val art = state.albumArt
@@ -183,7 +187,7 @@ fun AudioPlayerScreen(
                     color = onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (state.playlistSize > 1) {
                     Text("${state.currentIndex + 1} / ${state.playlistSize}",
-                        style = MaterialTheme.typography.bodySmall, color = onSurfaceVar)
+                        style = MiuixTheme.textStyles.footnote1, color = onSurfaceVar)
                 }
 
                 Spacer(Modifier.height(8.dp))
@@ -303,16 +307,16 @@ fun AudioPlayerScreen(
                         val s = totalSec % 60
                         val timeStr = if (h > 0) String.format("%d:%02d", h, m) else String.format("%02d:%02d", m, s)
                         Text(timeStr,
-                            style = MaterialTheme.typography.labelSmall,
+                            style = MiuixTheme.textStyles.footnote2,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(end = 8.dp))
                     } else if (state.sleepRemaining == -1) {
                         Text(stringResource(R.string.sleep_timer_waiting),
-                            style = MaterialTheme.typography.labelSmall,
+                            style = MiuixTheme.textStyles.footnote2,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(end = 8.dp))
                         Text(stringResource(R.string.sleep_timer_waiting),
-                            style = MaterialTheme.typography.labelSmall,
+                            style = MiuixTheme.textStyles.footnote2,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(end = 8.dp))
                     }
@@ -350,11 +354,11 @@ fun AudioPlayerScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.graphicsLayer { alpha = contentAlpha }
         ) {
-            Text(state.title, style = MaterialTheme.typography.titleMedium,
+            Text(state.title, style = MiuixTheme.textStyles.main,
                 color = onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (state.playlistSize > 1) {
                 Text("${state.currentIndex + 1} / ${state.playlistSize}",
-                    style = MaterialTheme.typography.bodySmall, color = onSurfaceVar)
+                    style = MiuixTheme.textStyles.footnote1, color = onSurfaceVar)
             }
             Spacer(Modifier.height(12.dp))
             if (state.initialized) {
@@ -588,8 +592,10 @@ private fun AlbumOrLyrics(
                     scaleY = coverScale
                     alpha = coverAlpha
                 }
-                .clip(RoundedCornerShape(10.dp))
-                .background(surface)
+                .squircleSurface(
+                    color = surface,
+                    cornerRadius = 10.dp,
+                )
                 .combinedClickable(
                     onClick = {},
                     onDoubleClick = onToggleLyrics,
@@ -687,12 +693,12 @@ private fun IndependentProgressBar(
         ) {
             Text(
                 formatTime(if (duration > 0) pos else 0),
-                style = MaterialTheme.typography.bodySmall,
+                style = MiuixTheme.textStyles.footnote1,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
                 formatTime(duration),
-                style = MaterialTheme.typography.bodySmall,
+                style = MiuixTheme.textStyles.footnote1,
                 color = MaterialTheme.colorScheme.onSurface
             )
         }
@@ -821,7 +827,7 @@ private fun SleepTimerDialog(
         ) {
             Text(
                 stringResource(R.string.sleep_timer_title),
-                style = MaterialTheme.typography.titleMedium,
+                style = MiuixTheme.textStyles.main,
                 modifier = Modifier.fillMaxWidth(),
                 textAlign = TextAlign.Center
             )
@@ -854,15 +860,17 @@ private fun SleepTimerDialog(
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(48.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(MaterialTheme.colorScheme.primary)
+                                    .squircleSurface(
+                                        color = MaterialTheme.colorScheme.primary,
+                                        cornerRadius = 10.dp,
+                                    )
                                     .clickable { onSet(min, finishSong) },
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
                                     text = "${min}",
                                     color = MaterialTheme.colorScheme.onPrimary,
-                                    style = MaterialTheme.typography.titleMedium
+                                    style = MiuixTheme.textStyles.main
                                 )
                             }
                         }
@@ -888,7 +896,7 @@ private fun SleepTimerDialog(
                     text = timeStr,
                     modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                     textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MiuixTheme.textStyles.main,
                     color = MaterialTheme.colorScheme.primary
                 )
             }
@@ -1044,7 +1052,7 @@ private fun PlaylistDialog(
         ) {
             Text(
                 stringResource(R.string.playlist_title),
-                style = MaterialTheme.typography.titleMedium,
+                style = MiuixTheme.textStyles.main,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
                 textAlign = TextAlign.Center
             )

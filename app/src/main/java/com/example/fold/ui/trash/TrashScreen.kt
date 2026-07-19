@@ -5,7 +5,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
@@ -22,6 +21,7 @@ import com.example.fold.R
 import com.example.fold.ui.filebrowser.formatFileSize
 import com.example.fold.ui.filebrowser.formatTimestamp
 import com.example.fold.ui.theme.MiuixSuccess
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import java.io.File
 
 data class TrashItem(
@@ -97,7 +97,7 @@ fun TrashScreen(
         } else {
             Text(
                 text = stringResource(R.string.trash_count, trashFiles.size),
-                style = MaterialTheme.typography.bodySmall,
+                style = MiuixTheme.textStyles.footnote1,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
             )
@@ -112,11 +112,11 @@ fun TrashScreen(
                             Column {
                                 if (item.originalPath != null) {
                                     Text(item.originalPath, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        style = MiuixTheme.textStyles.footnote1, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                                 Text(
                                     "${formatFileSize(item.file.length())}  ·  ${formatTimestamp(item.file.lastModified())}",
-                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    style = MiuixTheme.textStyles.footnote1, color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         },

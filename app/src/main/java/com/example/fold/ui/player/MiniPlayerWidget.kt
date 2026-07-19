@@ -16,6 +16,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import top.yukonga.miuix.kmp.squircle.squircleClip
+import top.yukonga.miuix.kmp.squircle.squircleSurface
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Pause
@@ -87,18 +89,22 @@ fun MiniPlayerFloatingWidget(
             Row(
                 modifier = Modifier
                     .padding(end = 16.dp, bottom = 80.dp)
-                    .clip(RoundedCornerShape(28.dp))
                     .then(
                         if (blurEnabled) {
-                            Modifier.textureBlur(
-                                backdrop = backdrop,
-                                shape = RoundedCornerShape(28.dp),
-                                blurRadius = 10f,
-                                colors = blurColors,
-                                highlight = Highlight.GlassStrokeMiddleLight
-                            )
+                            Modifier
+                                .clip(RoundedCornerShape(28.dp))
+                                .textureBlur(
+                                    backdrop = backdrop,
+                                    shape = RoundedCornerShape(28.dp),
+                                    blurRadius = 10f,
+                                    colors = blurColors,
+                                    highlight = Highlight.GlassStrokeMiddleLight
+                                )
                         } else {
-                            Modifier.background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f))
+                            Modifier.squircleSurface(
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f),
+                                cornerRadius = 28.dp,
+                            )
                         }
                     )
                     .clickable { onOpenPlayer() }

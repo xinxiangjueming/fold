@@ -39,6 +39,7 @@ import com.example.fold.R
 import com.example.fold.data.archive.ArchiveEntry
 import com.example.fold.data.archive.ArchiveHelper
 import com.example.fold.ui.filebrowser.formatFileSize
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -85,14 +86,14 @@ fun ArchiveViewerScreen(
                     Column {
                         Text(
                             text = file.name,
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MiuixTheme.textStyles.main,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                         if (entries.isNotEmpty()) {
                             Text(
                                 text = "${stringResource(R.string.archive_entry_count, entries.size)} · ${formatFileSize(file.length())}",
-                                style = MaterialTheme.typography.bodySmall,
+                                style = MiuixTheme.textStyles.footnote1,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -159,14 +160,14 @@ fun ArchiveViewerScreen(
                     ) {
                         CircularProgressIndicator()
                         Spacer(Modifier.height(16.dp))
-                        Text(extractMessage, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(extractMessage, style = MiuixTheme.textStyles.footnote1, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Spacer(Modifier.height(8.dp))
                         LinearProgressIndicator(
                             progress = { extractProgress },
                             modifier = Modifier.fillMaxWidth()
                         )
                         Spacer(Modifier.height(4.dp))
-                        Text("${(extractProgress * 100).toInt()}%", style = MaterialTheme.typography.labelSmall)
+                        Text("${(extractProgress * 100).toInt()}%", style = MiuixTheme.textStyles.footnote2)
                     }
                 }
                 else -> {

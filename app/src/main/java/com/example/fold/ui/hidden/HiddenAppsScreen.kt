@@ -15,6 +15,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import top.yukonga.miuix.kmp.squircle.squircleClip
+import top.yukonga.miuix.kmp.squircle.squircleSurface
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -40,6 +42,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.fold.R
 import com.example.fold.data.manager.AppHider
 import com.example.fold.util.FoldLogger
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import kotlinx.coroutines.launch
 
 private const val TAG = "HiddenApps"
@@ -166,7 +169,7 @@ fun HiddenAppsScreen(
                                     else -> R.string.hidden_method_shizuku
                                 }
                             ),
-                            style = MaterialTheme.typography.labelSmall,
+                            style = MiuixTheme.textStyles.footnote2,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier
                                 .padding(end = 12.dp)
@@ -269,7 +272,7 @@ fun HiddenAppsScreen(
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
+                                .squircleClip(cornerRadius = 12.dp)
                                 .combinedClickable(
                                     onClick = {
                                         scope.launch {
@@ -286,7 +289,7 @@ fun HiddenAppsScreen(
                             Spacer(Modifier.height(6.dp))
                             Text(
                                 app.name,
-                                style = MaterialTheme.typography.bodySmall,
+                                style = MiuixTheme.textStyles.footnote1,
                                 color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -398,10 +401,10 @@ private fun AppPickerDialog(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(
-                                    if (isChecked) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                                    else Color.Transparent
+                                .squircleSurface(
+                                    color = if (isChecked) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                                    else Color.Transparent,
+                                    cornerRadius = 8.dp,
                                 )
                                 .combinedClickable(
                                     onClick = {
@@ -418,7 +421,7 @@ private fun AppPickerDialog(
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(app.name, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(app.packageName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(app.packageName, style = MiuixTheme.textStyles.footnote1, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                             if (isChecked) {
                                 Icon(
@@ -460,7 +463,7 @@ private fun AppIcon(drawable: Drawable, modifier: Modifier = Modifier) {
     androidx.compose.foundation.Image(
         bitmap = bitmap,
         contentDescription = null,
-        modifier = modifier.clip(RoundedCornerShape(16.dp)),
+        modifier = modifier.squircleClip(cornerRadius = 16.dp),
         contentScale = ContentScale.Fit
     )
 }

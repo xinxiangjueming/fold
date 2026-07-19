@@ -9,6 +9,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import top.yukonga.miuix.kmp.squircle.squircleSurface
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.*
@@ -56,7 +58,7 @@ internal fun ReaderSettingsPanel(
         elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
     ) {
         Column(modifier = Modifier.padding(20.dp).verticalScroll(rememberScrollState())) {
-            Text(stringResource(R.string.reader_settings), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 16.dp), color = MaterialTheme.colorScheme.onSurface)
+            Text(stringResource(R.string.reader_settings), style = MiuixTheme.textStyles.main, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 16.dp), color = MaterialTheme.colorScheme.onSurface)
 
             // 字号
             Text(stringResource(R.string.reader_font_size, state.fontSize.toInt()), color = MaterialTheme.colorScheme.onSurface)
@@ -79,8 +81,10 @@ internal fun ReaderSettingsPanel(
                     Box(
                         modifier = Modifier
                             .size(40.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(androidx.compose.ui.graphics.Color(theme.bgColor))
+                            .squircleSurface(
+                                color = androidx.compose.ui.graphics.Color(theme.bgColor),
+                                cornerRadius = 8.dp,
+                            )
                             .then(
                                 if (isSelected) Modifier.border(
                                     width = 2.dp,
@@ -94,7 +98,7 @@ internal fun ReaderSettingsPanel(
                         Text(
                             text = stringResource(theme.labelResId).first().toString(),
                             color = androidx.compose.ui.graphics.Color(theme.textColor),
-                            style = MaterialTheme.typography.bodySmall,
+                            style = MiuixTheme.textStyles.footnote1,
                             fontWeight = FontWeight.Bold
                         )
                     }
@@ -105,9 +109,9 @@ internal fun ReaderSettingsPanel(
             // 边距
             Text(stringResource(R.string.reader_margin, state.marginLeft.toInt(), state.marginRight.toInt()), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
             Spacer(Modifier.height(4.dp))
-            Text(stringResource(R.string.reader_margin_left), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.reader_margin_left), style = MiuixTheme.textStyles.footnote1, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Slider(value = state.marginLeft, onValueChange = { onMarginsChange(it, state.marginRight) }, valueRange = 0f..60f, steps = 11)
-            Text(stringResource(R.string.reader_margin_right), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.reader_margin_right), style = MiuixTheme.textStyles.footnote1, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Slider(value = state.marginRight, onValueChange = { onMarginsChange(state.marginLeft, it) }, valueRange = 0f..60f, steps = 11)
             Spacer(Modifier.height(12.dp))
 
@@ -140,7 +144,7 @@ internal fun ReaderSettingsPanel(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(stringResource(R.string.reader_re_segment), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
-                    Text(stringResource(R.string.reader_re_segment_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.reader_re_segment_desc), style = MiuixTheme.textStyles.footnote1, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Switch(checked = state.reSegment, onCheckedChange = { onReSegmentToggle() })
             }
@@ -158,7 +162,7 @@ internal fun ReaderSettingsPanel(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(stringResource(R.string.chinese_convert), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
-                    Text(chineseConvertLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(chineseConvertLabel, style = MiuixTheme.textStyles.footnote1, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 TextButton(onClick = onChineseConvertCycle) {
                     Text(when (state.chineseConvert) {
@@ -176,7 +180,7 @@ internal fun ReaderSettingsPanel(
                 val fontName = if (state.fontPath.isNotEmpty() && File(state.fontPath).exists()) {
                     File(state.fontPath).nameWithoutExtension
                 } else stringResource(R.string.reader_font_default)
-                Text(fontName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                Text(fontName, style = MiuixTheme.textStyles.footnote1, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
                 OutlinedButton(onClick = { fontPickerLauncher.launch("*/*") }, shape = RoundedCornerShape(12.dp)) {
                     Icon(Icons.Filled.FontDownload, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(4.dp))
@@ -201,7 +205,7 @@ internal fun ReaderSettingsPanel(
                 Spacer(Modifier.width(8.dp))
                 Text(stringResource(R.string.reader_word_replace), color = MaterialTheme.colorScheme.onSurface)
                 Spacer(Modifier.weight(1f))
-                Text("${state.wordReplacements.size}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("${state.wordReplacements.size}", style = MiuixTheme.textStyles.footnote1, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
             if (showWordReplace) {
@@ -237,9 +241,9 @@ private fun WordReplacementPanel(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(orig, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                Text(orig, style = MiuixTheme.textStyles.footnote1, modifier = Modifier.weight(1f))
                 Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(repl, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f).padding(start = 4.dp))
+                Text(repl, style = MiuixTheme.textStyles.footnote1, modifier = Modifier.weight(1f).padding(start = 4.dp))
                 IconButton(onClick = { onRemove(orig) }, modifier = Modifier.size(32.dp)) {
                     Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
                 }
