@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -25,6 +26,9 @@ fun WaveProgress(
     strokeWidthDp: Float = 2f,
     amplitudeDp: Float = 3f,
     frequency: Float = 0.05f,
+    showThumb: Boolean = false,
+    thumbColor: Color = waveColor,
+    thumbRadiusDp: Float = 5f,
 ) {
     val density = LocalDensity.current
     val strokeWidth = with(density) { strokeWidthDp.dp.toPx() }
@@ -57,6 +61,16 @@ fun WaveProgress(
                 path = wavePath,
                 color = waveColor,
                 style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+            )
+        }
+
+        // 圆点指示器
+        if (showThumb) {
+            val thumbRadius = with(density) { thumbRadiusDp.dp.toPx() }
+            drawCircle(
+                color = thumbColor,
+                radius = thumbRadius,
+                center = Offset(width * progress.coerceIn(0f, 1f), centerY)
             )
         }
     }

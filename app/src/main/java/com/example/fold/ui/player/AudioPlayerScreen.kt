@@ -14,6 +14,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
@@ -22,7 +23,10 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -37,6 +41,8 @@ import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.Alignment
@@ -47,9 +53,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -58,6 +66,7 @@ import com.example.fold.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
@@ -90,12 +99,15 @@ fun AudioPlayerScreen(
         android.util.Log.d("AudioPlayer", "isImmersive changed: ${state.isImmersive}")
     }
 
-    // 歌词行自动滚动
+    // 歌词行自动滚动到屏幕中心
     val lyricsListState = rememberLazyListState()
+    val lyricScreenHeightPx = with(LocalDensity.current) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
+
     LaunchedEffect(state.currentLyricIndex, state.title) {
-        if (state.currentLyricIndex >= 0) {
+        if (state.currentLyricIndex >= 0 && state.currentLyricIndex < state.lyrics.size) {
             lyricsListState.animateScrollToItem(
-                (state.currentLyricIndex - 7).coerceAtLeast(0)
+                index = state.currentLyricIndex,
+                scrollOffset = (-lyricScreenHeightPx / 2).toInt()
             )
         }
     }
@@ -125,31 +137,29 @@ fun AudioPlayerScreen(
 
     AnimatedContent(targetState = isLandscape, label = "orientation") { targetIsLandscape ->
     if (targetIsLandscape) {
-        // ===== 横屏布局：左封面+控制，右歌词 =====
+        // ===== 横屏布局：左封面 + 右控制（椒盐音乐风格）=====
         Row(
             Modifier
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.background),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // 左侧：封面 + 控制
-            Column(
+            // 左侧：封面（居中，大尺寸）
+            Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
+                    .padding(16.dp),
+                contentAlignment = Alignment.Center
             ) {
-                // 封面
                 val coverScale by androidx.compose.animation.core.animateFloatAsState(
-                    targetValue = if (state.isPlaying) 1.4f else 1.3f,
+                    targetValue = if (state.isPlaying) 1.2f else 1.1f,
                     animationSpec = androidx.compose.animation.core.tween(300),
                     label = "coverScale"
                 )
                 Box(
                     modifier = Modifier
-                        .size(160.dp)
+                        .size(200.dp)
                         .graphicsLayer {
                             scaleX = coverScale
                             scaleY = coverScale
@@ -179,10 +189,18 @@ fun AudioPlayerScreen(
                         }
                     }
                 }
+            }
 
-                Spacer(Modifier.height(12.dp))
-
-                // 曲名
+            // 右侧：歌名 + 进度条 + 控制
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .padding(start = 16.dp, end = 16.dp, top = 60.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // 歌名
                 Text(state.title, style = MaterialTheme.typography.titleSmall,
                     color = onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (state.playlistSize > 1) {
@@ -190,7 +208,7 @@ fun AudioPlayerScreen(
                         style = MiuixTheme.textStyles.footnote1, color = onSurfaceVar)
                 }
 
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(12.dp))
 
                 // 进度条
                 if (state.initialized) {
@@ -201,7 +219,7 @@ fun AudioPlayerScreen(
                     )
                 }
 
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(12.dp))
 
                 // 播放控制
                 PlaybackControls(
@@ -215,7 +233,7 @@ fun AudioPlayerScreen(
 
                 Spacer(Modifier.height(8.dp))
 
-                // 功能按钮（沉浸模式隐藏）
+                // 功能按钮
                 FeatureButtons(
                     loopMode = state.loopMode,
                     sleepActive = state.sleepRemaining != 0,
@@ -228,176 +246,83 @@ fun AudioPlayerScreen(
                     visible = !state.isImmersive
                 )
             }
-
-            // 右侧：歌词
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .padding(end = 16.dp, top = 8.dp, bottom = 8.dp)
-            ) {
-                // 歌词列表
-                if (state.lyrics.isNotEmpty()) {
-                    LazyColumn(
-                        state = lyricsListState,
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        items(state.lyrics.size, key = { it }) { idx ->
-                            Text(
-                                text = state.lyrics[idx].second,
-                                fontSize = if (idx == state.currentLyricIndex) 16.sp else 13.sp,
-                                color = if (idx == state.currentLyricIndex) onSurface
-                                else onSurfaceVar.copy(alpha = 0.5f),
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                            )
-                        }
-                    }
-                } else {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(stringResource(R.string.reader_no_content),
-                            style = MaterialTheme.typography.bodyMedium, color = onSurfaceVar)
-                    }
-                }
-            }
         }
     } else {
     // ===== 竖屏布局 =====
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(horizontal = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        // ===== TopBar（沉浸模式隐藏）=====
-        val topBarAlpha by androidx.compose.animation.core.animateFloatAsState(
-            targetValue = if (state.isImmersive) 0f else 1f,
-            animationSpec = androidx.compose.animation.core.tween(300),
-            label = "topBarAlpha"
-        )
-        TopAppBar(
-            modifier = Modifier.graphicsLayer { alpha = topBarAlpha },
-                title = { Text(stringResource(R.string.audio_player_title)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.action_back))
-                    }
-                },
-                actions = {
-                    // USB 独占模式按钮（暂时禁用）
-                    // if (MusicPlayerHolder.isExclusiveSupported()) {
-                    //     IconButton(onClick = {
-                    //         android.util.Log.i("AudioPlayerScreen", "USB button clicked, showUsbDialog=$showUsbDialog")
-                    //         showUsbDialog = true
-                    //     }) {
-                    //         Icon(
-                    //             Icons.Default.Usb,
-                    //             contentDescription = "USB 独占",
-                    //             tint = if (isExclusive) MaterialTheme.colorScheme.primary else onSurfaceVar
-                    //         )
-                    //     }
-                    // }
-                    if (state.sleepRemaining > 0) {
-                        val totalSec = state.sleepRemaining
-                        val h = totalSec / 3600
-                        val m = (totalSec % 3600) / 60
-                        val s = totalSec % 60
-                        val timeStr = if (h > 0) String.format("%d:%02d", h, m) else String.format("%02d:%02d", m, s)
-                        Text(timeStr,
-                            style = MiuixTheme.textStyles.footnote2,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(end = 8.dp))
-                    } else if (state.sleepRemaining == -1) {
-                        Text(stringResource(R.string.sleep_timer_waiting),
-                            style = MiuixTheme.textStyles.footnote2,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(end = 8.dp))
-                        Text(stringResource(R.string.sleep_timer_waiting),
-                            style = MiuixTheme.textStyles.footnote2,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(end = 8.dp))
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background)
-            )
+    var currentPage by remember { mutableIntStateOf(0) }
+    val offset = remember { androidx.compose.animation.core.Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val screenWidthPx = with(density) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
+    val screenWidth = LocalConfiguration.current.screenWidthDp.dp
 
-        Spacer(Modifier.weight(0.5f))
-
-        // ===== 封面 / 歌词 =====
-        AlbumOrLyrics(
-            albumArt = state.albumArt,
-            showLyrics = state.showLyrics,
-            isPlaying = state.isPlaying,
-            lyrics = state.lyrics,
-            currentLyricIndex = state.currentLyricIndex,
-            lyricsListState = lyricsListState,
-            onToggleLyrics = { vm.toggleLyrics() },
-            onSurface = onSurface,
-            onSurfaceVar = onSurfaceVar,
-            surface = surface,
-            modifier = Modifier.weight(9f)
-        )
-
-        Spacer(Modifier.weight(0.5f))
-
-        // ===== 曲目名 + 进度条（沉浸模式隐藏）=====
-        val contentAlpha by androidx.compose.animation.core.animateFloatAsState(
-            targetValue = if (state.isImmersive) 0f else 1f,
-            animationSpec = androidx.compose.animation.core.tween(300),
-            label = "contentAlpha"
-        )
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.graphicsLayer { alpha = contentAlpha }
+    Box(Modifier.fillMaxSize()) {
+        // 两个页面并排，通过偏移量控制显示
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer { translationX = offset.value }
         ) {
-            Text(state.title, style = MiuixTheme.textStyles.main,
-                color = onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (state.playlistSize > 1) {
-                Text("${state.currentIndex + 1} / ${state.playlistSize}",
-                    style = MiuixTheme.textStyles.footnote1, color = onSurfaceVar)
-            }
-            Spacer(Modifier.height(12.dp))
-            if (state.initialized) {
-                IndependentProgressBar(
-                    exoPlayer = vm.exoPlayer,
+            // 播放页
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .width(screenWidth)
+            ) {
+                PlayerPage(
+                    albumArt = state.albumArt,
+                    isPlaying = state.isPlaying,
+                    title = state.title,
+                    currentIndex = state.currentIndex,
+                    playlistSize = state.playlistSize,
                     duration = state.duration,
-                    onSeek = { vm.seekTo(it) }
+                    initialized = state.initialized,
+                    isImmersive = state.isImmersive,
+                    loopMode = state.loopMode,
+                    sleepRemaining = state.sleepRemaining,
+                    onBack = onBack,
+                    onPrev = { vm.prev() },
+                    onTogglePlay = { vm.togglePlay() },
+                    onNext = { vm.next() },
+                    onLongPressToggle = { vm.toggleImmersive() },
+                    onLoopChange = { vm.cycleLoopMode() },
+                    onSleepClick = { showSleepDialog = true },
+                    onEqualizerClick = handleEqualizerClick,
+                    onPlaylistClick = { showPlaylist = true },
+                    exoPlayer = if (state.initialized) vm.exoPlayer else null,
+                    onSeek = { vm.seekTo(it) },
+                    onSwipeToLyrics = { currentPage = 1 },
+                    gestureEnabled = currentPage == 0
+                )
+                // 非当前页时拦截所有触摸事件，防止 PlayerPage 手势拦截歌词页
+                if (currentPage != 0) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .pointerInput(Unit) {
+                                awaitPointerEventScope {
+                                    while (true) {
+                                        awaitPointerEvent().changes.forEach { it.consume() }
+                                    }
+                                }
+                            }
+                    )
+                }
+            }
+            // 歌词页（垂直滚动由 LazyColumn 自然处理）
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .width(screenWidth)
+            ) {
+                LyricsPage(
+                    lyrics = state.lyrics,
+                    currentLyricIndex = state.currentLyricIndex,
+                    listState = lyricsListState,
+                    onSwipeToPlayer = { currentPage = 0 }
                 )
             }
         }
-
-        Spacer(Modifier.height(12.dp))
-
-        // ===== 播放控制 =====
-        PlaybackControls(
-            isPlaying = state.isPlaying,
-            onPrev = { vm.prev() },
-            onToggle = { vm.togglePlay() },
-            onNext = { vm.next() },
-            onLongPressToggle = { vm.toggleImmersive() },
-            tint = onSurface
-        )
-
-        Spacer(Modifier.height(12.dp))
-
-        // ===== 功能按钮行（沉浸模式隐藏）=====
-        FeatureButtons(
-            loopMode = state.loopMode,
-            sleepActive = state.sleepRemaining != 0,
-            onLoopChange = { vm.cycleLoopMode() },
-            onSleepClick = { showSleepDialog = true },
-            onEqualizerClick = handleEqualizerClick,
-            onPlaylistClick = { showPlaylist = true },
-            primaryColor = MaterialTheme.colorScheme.primary,
-            variantColor = onSurfaceVar,
-            visible = !state.isImmersive
-        )
-
-        Spacer(Modifier.weight(0.5f))
     }
     }
     } // end AnimatedContent
@@ -417,10 +342,29 @@ fun AudioPlayerScreen(
             state.playlistPaths.map { it.substringAfterLast('/').substringBeforeLast('.') }
         }
         val curIdx = state.currentIndex
+        val displayOrder = state.shuffledDisplayOrder
+
+        // 随机模式下按随机顺序显示，否则原序
+        val orderedNames = if (displayOrder.isNotEmpty()) {
+            displayOrder.map { playlistNames[it] }
+        } else {
+            playlistNames
+        }
+        // 当前播放项在显示列表中的位置
+        val displayCurrentIndex = if (displayOrder.isNotEmpty()) {
+            displayOrder.indexOf(curIdx).coerceAtLeast(0)
+        } else {
+            curIdx
+        }
+
         PlaylistDialog(
-            playlist = playlistNames,
-            currentIndex = curIdx,
-            onSelect = { vm.seekToIndex(it) },
+            playlist = orderedNames,
+            currentIndex = displayCurrentIndex,
+            onSelect = { displayIdx ->
+                // 映射回原始索引
+                val originalIdx = if (displayOrder.isNotEmpty()) displayOrder[displayIdx] else displayIdx
+                vm.seekToIndex(originalIdx)
+            },
             onDismiss = { showPlaylist = false }
         )
     }
@@ -497,115 +441,109 @@ fun AudioPlayerScreen(
 
 // ==================== 子组件 ====================
 
-/** 封面 / 歌词切换区 */
-@OptIn(ExperimentalFoundationApi::class)
+/** 播放页 — 完整播放界面（封面 + 标题 + 进度条 + 控制 + 按钮） */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AlbumOrLyrics(
+private fun PlayerPage(
     albumArt: android.graphics.Bitmap?,
-    showLyrics: Boolean,
     isPlaying: Boolean,
-    lyrics: List<Pair<Long, String>>,
-    currentLyricIndex: Int,
-    lyricsListState: androidx.compose.foundation.lazy.LazyListState,
-    onToggleLyrics: () -> Unit,
-    onSurface: Color,
-    onSurfaceVar: Color,
-    surface: Color,
-    modifier: Modifier = Modifier
+    title: String,
+    currentIndex: Int,
+    playlistSize: Int,
+    duration: Long,
+    initialized: Boolean,
+    isImmersive: Boolean,
+    loopMode: Int,
+    sleepRemaining: Int,
+    onBack: () -> Unit,
+    onPrev: () -> Unit,
+    onTogglePlay: () -> Unit,
+    onNext: () -> Unit,
+    onLongPressToggle: () -> Unit,
+    onLoopChange: () -> Unit,
+    onSleepClick: () -> Unit,
+    onEqualizerClick: () -> Unit,
+    onPlaylistClick: () -> Unit,
+    exoPlayer: androidx.media3.exoplayer.ExoPlayer?,
+    onSeek: (Long) -> Unit,
+    onSwipeToLyrics: () -> Unit = {},
+    gestureEnabled: Boolean = true,
 ) {
-    val coverScale by androidx.compose.animation.core.animateFloatAsState(
-        targetValue = if (isPlaying) 1.4f else 1.3f,
-        animationSpec = androidx.compose.animation.core.tween(300),
-        label = "coverScale"
-    )
+    val onSurface = MaterialTheme.colorScheme.onSurface
+    val onSurfaceVar = MaterialTheme.colorScheme.onSurfaceVariant
 
-    Box(
-        modifier.fillMaxWidth(),
-        contentAlignment = Alignment.Center
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(horizontal = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        AnimatedVisibility(visible = showLyrics && lyrics.isNotEmpty(), enter = fadeIn(), exit = fadeOut()) {
-            LazyColumn(
-                state = lyricsListState,
-                modifier = Modifier.fillMaxSize(),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // 顶部留白，让当前歌词能居中偏下
-                item { Spacer(Modifier.height(200.dp)) }
-                items(lyrics.size, key = { it }) { idx ->
-                    val distance = kotlin.math.abs(idx - currentLyricIndex)
-                    val targetAlpha = when {
-                        distance == 0 -> 1f
-                        distance == 1 -> 0.65f
-                        distance == 2 -> 0.4f
-                        distance == 3 -> 0.25f
-                        else -> 0.15f
-                    }
-                    val animatedAlpha by androidx.compose.animation.core.animateFloatAsState(
-                        targetValue = targetAlpha,
-                        animationSpec = androidx.compose.animation.core.tween(400),
-                        label = "lyricAlpha$idx"
-                    )
-                    val targetSize = when {
-                        distance == 0 -> 20f
-                        distance == 1 -> 17f
-                        else -> 15f
-                    }
-                    val animatedSize by androidx.compose.animation.core.animateFloatAsState(
-                        targetValue = targetSize,
-                        animationSpec = androidx.compose.animation.core.tween(400),
-                        label = "lyricSize$idx"
-                    )
-                    Text(
-                        text = lyrics[idx].second,
-                        fontSize = animatedSize.sp,
-                        color = if (idx == currentLyricIndex) onSurface
-                                else onSurfaceVar.copy(alpha = animatedAlpha),
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 6.dp)
-                            .pointerInput(Unit) {
-                                detectTapGestures(
-                                    onDoubleTap = {
-                                        android.util.Log.d("AlbumOrLyrics", "lyric doubleTap idx=$idx")
-                                        onToggleLyrics()
-                                    }
-                                )
-                            }
-                    )
-                }
-                // 底部留白
-                item { Spacer(Modifier.height(200.dp)) }
-            }
-        }
-
-        val coverAlpha by androidx.compose.animation.core.animateFloatAsState(
-            targetValue = if (!showLyrics || lyrics.isEmpty()) 1f else 0f,
+        // ===== TopBar（沉浸模式隐藏）=====
+        val topBarAlpha by androidx.compose.animation.core.animateFloatAsState(
+            targetValue = if (isImmersive) 0f else 1f,
             animationSpec = androidx.compose.animation.core.tween(300),
-            label = "coverAlpha"
+            label = "topBarAlpha"
+        )
+        TopAppBar(
+            modifier = Modifier.graphicsLayer { alpha = topBarAlpha },
+            title = { Text(stringResource(R.string.audio_player_title)) },
+            navigationIcon = {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = stringResource(R.string.action_back))
+                }
+            },
+            actions = {
+                if (sleepRemaining > 0) {
+                    val totalSec = sleepRemaining
+                    val h = totalSec / 3600
+                    val m = (totalSec % 3600) / 60
+                    val s = totalSec % 60
+                    val timeStr = if (h > 0) String.format("%d:%02d", h, m) else String.format("%02d:%02d", m, s)
+                    Text(timeStr,
+                        style = MiuixTheme.textStyles.footnote2,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(end = 8.dp))
+                } else if (sleepRemaining == -1) {
+                    Text(stringResource(R.string.sleep_timer_waiting),
+                        style = MiuixTheme.textStyles.footnote2,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(end = 8.dp))
+                }
+            },
+            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = MaterialTheme.colorScheme.background)
+        )
+
+        Spacer(Modifier.weight(1f))
+
+        // ===== 封面（固定大小，居中）=====
+        val coverScale by androidx.compose.animation.core.animateFloatAsState(
+            targetValue = if (isPlaying) 1.2f else 1.1f,
+            animationSpec = androidx.compose.animation.core.tween(300),
+            label = "coverScale"
         )
         Box(
             modifier = Modifier
-                .size(240.dp)
+                .size(260.dp)
                 .graphicsLayer {
                     scaleX = coverScale
                     scaleY = coverScale
-                    alpha = coverAlpha
                 }
                 .squircleSurface(
-                    color = surface,
+                    color = MaterialTheme.colorScheme.surface,
                     cornerRadius = 10.dp,
                 )
-                .combinedClickable(
-                    onClick = {},
-                    onDoubleClick = onToggleLyrics,
-                    enabled = coverAlpha > 0.5f
-                ),
+                .pointerInput(gestureEnabled) {
+                    detectDragGestures { _, dragAmount ->
+                        if (gestureEnabled && dragAmount.x < -30) onSwipeToLyrics()
+                    }
+                },
             contentAlignment = Alignment.Center
         ) {
-            val art = albumArt
-            androidx.compose.animation.AnimatedContent(
-                targetState = art,
+            AnimatedContent(
+                targetState = albumArt,
                 transitionSpec = {
                     fadeIn(tween(400)) togetherWith fadeOut(tween(400))
                 },
@@ -620,6 +558,146 @@ private fun AlbumOrLyrics(
                         modifier = Modifier.size(80.dp),
                         tint = onSurfaceVar.copy(alpha = 0.5f))
                 }
+            }
+        }
+
+        Spacer(Modifier.weight(1f))
+
+        // ===== 曲目名 + 进度条（沉浸模式隐藏）=====
+        val contentAlpha by androidx.compose.animation.core.animateFloatAsState(
+            targetValue = if (isImmersive) 0f else 1f,
+            animationSpec = androidx.compose.animation.core.tween(300),
+            label = "contentAlpha"
+        )
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.graphicsLayer { alpha = contentAlpha }
+        ) {
+            Text(title, style = MiuixTheme.textStyles.main,
+                color = onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (playlistSize > 1) {
+                Text("${currentIndex + 1} / $playlistSize",
+                    style = MiuixTheme.textStyles.footnote1, color = onSurfaceVar)
+            }
+            Spacer(Modifier.height(12.dp))
+            if (initialized && exoPlayer != null) {
+                IndependentProgressBar(
+                    exoPlayer = exoPlayer,
+                    duration = duration,
+                    onSeek = onSeek
+                )
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        // ===== 播放控制 =====
+        PlaybackControls(
+            isPlaying = isPlaying,
+            onPrev = onPrev,
+            onToggle = onTogglePlay,
+            onNext = onNext,
+            onLongPressToggle = onLongPressToggle,
+            tint = onSurface
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        // ===== 功能按钮行（沉浸模式隐藏）=====
+        FeatureButtons(
+            loopMode = loopMode,
+            sleepActive = sleepRemaining != 0,
+            onLoopChange = onLoopChange,
+            onSleepClick = onSleepClick,
+            onEqualizerClick = onEqualizerClick,
+            onPlaylistClick = onPlaylistClick,
+            primaryColor = MaterialTheme.colorScheme.primary,
+            variantColor = onSurfaceVar,
+            visible = !isImmersive
+        )
+
+        Spacer(Modifier.weight(0.3f))
+    }
+}
+
+/** 歌词页 — 固定中心线，内容滚动 */
+@Composable
+private fun LyricsPage(
+    lyrics: List<Pair<Long, String>>,
+    currentLyricIndex: Int,
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    onSwipeToPlayer: () -> Unit = {},
+) {
+    val onSurface = MaterialTheme.colorScheme.onSurface
+    val onSurfaceVar = MaterialTheme.colorScheme.onSurfaceVariant
+    val configuration = LocalConfiguration.current
+
+    var totalDragX by remember { mutableStateOf(0f) }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragStart = { totalDragX = 0f },
+                    onDragEnd = {
+                        if (totalDragX > 30) onSwipeToPlayer()
+                        totalDragX = 0f
+                    },
+                    onHorizontalDrag = { _, dragAmount ->
+                        totalDragX += dragAmount
+                    }
+                )
+            }
+    ) {
+        if (lyrics.isNotEmpty()) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // 顶部 50% 屏幕高度空白
+                item(key = "top_spacer") {
+                    Spacer(Modifier.height(configuration.screenHeightDp.dp / 2))
+                }
+
+                items(lyrics.size, key = { it }) { idx ->
+                    val viewportCenter = listState.layoutInfo.viewportEndOffset / 2f
+                    val itemInfo = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == idx }
+                    val itemCenter = itemInfo?.let { it.offset + it.size / 2f } ?: viewportCenter
+                    val distanceFromCenter = kotlin.math.abs(itemCenter - viewportCenter)
+                    val maxDistance = listState.layoutInfo.viewportEndOffset / 2f
+                    val normalizedDistance = if (maxDistance > 0f) {
+                        (distanceFromCenter / maxDistance).coerceIn(0f, 1f)
+                    } else {
+                        if (idx == currentLyricIndex) 0f else 1f
+                    }
+
+                    // 直接计算，无动画 — 滚动本身就是动画
+                    val alpha = (1f - normalizedDistance * 0.8f).coerceIn(0.2f, 1f)
+                    val fontSize = (20f - normalizedDistance * 6f).coerceAtLeast(14f)
+
+                    Text(
+                        text = lyrics[idx].second,
+                        fontSize = fontSize.sp,
+                        color = if (idx == currentLyricIndex) onSurface
+                                else onSurfaceVar.copy(alpha = alpha),
+                        textAlign = TextAlign.Center,
+                        fontWeight = if (idx == currentLyricIndex) FontWeight.Bold else FontWeight.Normal,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp)
+                    )
+                }
+
+                // 底部 50% 屏幕高度空白
+                item(key = "bottom_spacer") {
+                    Spacer(Modifier.height(configuration.screenHeightDp.dp / 2))
+                }
+            }
+        } else {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(stringResource(R.string.reader_no_content),
+                    style = MaterialTheme.typography.bodyMedium, color = onSurfaceVar)
             }
         }
     }
@@ -642,13 +720,14 @@ private fun IndependentProgressBar(
     var dragPosition by remember { mutableStateOf(0L) }
     var displayPos by remember { mutableStateOf(exoPlayer.currentPosition) }
 
-    // 仅这一个组件内部 250ms 轮询，不影响外部任何 composable
+    // 逐帧更新位置（匹配屏幕刷新率）
     LaunchedEffect(exoPlayer) {
         displayPos = 0L  // player 切换时重置位置
         while (isActive) {
-            delay(250)
-            if (!isDragging) {
-                displayPos = exoPlayer.currentPosition.coerceAtLeast(0L)
+            withFrameNanos {
+                if (!isDragging) {
+                    displayPos = exoPlayer.currentPosition.coerceAtLeast(0L)
+                }
             }
         }
     }
@@ -656,24 +735,52 @@ private fun IndependentProgressBar(
     val pos = if (isDragging) dragPosition else displayPos
     val progress = if (duration > 0) pos.toFloat() / duration else 0f
 
+    val barScale by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (isDragging) 1.05f else 1f,
+        animationSpec = tween(150),
+        label = "barScale"
+    )
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .alpha(if (duration > 0) 1f else 0.3f)
     ) {
-        // 波浪进度条（点击跳转区域）
+        // 波浪进度条（点击 + 拖拽跳转）
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(32.dp)
+                .graphicsLayer {
+                    scaleX = barScale
+                    scaleY = barScale
+                }
                 .pointerInput(duration) {
-                    detectTapGestures { offset ->
-                        if (duration > 0) {
-                            val seekPos = (offset.x / size.width * duration).toLong()
-                            displayPos = seekPos
-                            onSeek(seekPos)
+                    detectDragGestures(
+                        onDragStart = { offset ->
+                            if (duration > 0) {
+                                isDragging = true
+                                dragPosition = (offset.x / size.width * duration).toLong()
+                            }
+                        },
+                        onDragEnd = {
+                            if (isDragging) {
+                                onSeek(dragPosition)
+                                isDragging = false
+                            }
+                        },
+                        onDragCancel = {
+                            isDragging = false
+                        },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            if (duration > 0) {
+                                val newPos = (dragPosition + dragAmount.x / size.width * duration).toLong()
+                                    .coerceIn(0L, duration)
+                                dragPosition = newPos
+                            }
                         }
-                    }
+                    )
                 }
         ) {
             WaveProgress(
@@ -687,20 +794,36 @@ private fun IndependentProgressBar(
         }
 
         // 时间文字在进度条下方
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                formatTime(if (duration > 0) pos else 0),
-                style = MiuixTheme.textStyles.footnote1,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                formatTime(duration),
-                style = MiuixTheme.textStyles.footnote1,
-                color = MaterialTheme.colorScheme.onSurface
-            )
+        Box(Modifier.fillMaxWidth()) {
+            // 底层：固定布局（左右时间）
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    formatTime(if (duration > 0) pos else 0),
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (isDragging) 0.4f else 1f)
+                )
+                Text(
+                    formatTime(duration),
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (isDragging) 0.4f else 1f)
+                )
+            }
+            // 上层：拖拽时固定显示在左侧时间右边（不影响布局）
+            androidx.compose.animation.AnimatedVisibility(
+                visible = isDragging,
+                modifier = Modifier.align(Alignment.CenterStart)
+            ) {
+                Text(
+                    "  ${formatTime(dragPosition)}",
+                    modifier = Modifier.padding(start = 25.dp),
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
     }
 }
@@ -817,7 +940,8 @@ private fun SleepTimerDialog(
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = sheetState
+        sheetState = sheetState,
+        dragHandle = null
     ) {
         Column(
             modifier = Modifier
@@ -864,7 +988,10 @@ private fun SleepTimerDialog(
                                         color = MaterialTheme.colorScheme.primary,
                                         cornerRadius = 10.dp,
                                     )
-                                    .clickable { onSet(min, finishSong) },
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null
+                                    ) { onSet(min, finishSong) },
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
@@ -1043,7 +1170,8 @@ private fun PlaylistDialog(
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = sheetState
+        sheetState = sheetState,
+        dragHandle = null
     ) {
         Column(
             modifier = Modifier
@@ -1067,7 +1195,10 @@ private fun PlaylistDialog(
                     androidx.compose.foundation.layout.Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable {
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) {
                                 onSelect(idx)
                             }
                             .background(

@@ -34,12 +34,12 @@ data class MusicUiState(
     val albumArt: Bitmap? = null,
     val lyrics: List<Pair<Long, String>> = emptyList(),
     val currentLyricIndex: Int = -1,
-    val showLyrics: Boolean = false,
     val sleepMinutes: Int = 0,
     val sleepRemaining: Int = 0,    // >0 秒, -1=等待歌曲结束, 0=关闭
     val sleepFinishSong: Boolean = false,
     val audioSessionId: Int = -1,
     val playlistPaths: List<String> = emptyList(),
+    val shuffledDisplayOrder: List<Int> = emptyList(), // 随机模式下的显示顺序映射
     val initialized: Boolean = false,
     val isImmersive: Boolean = false,
 )
@@ -130,6 +130,13 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
                 duration = exoPlayer.duration.coerceAtLeast(0),
                 currentPosition = exoPlayer.currentPosition.coerceAtLeast(0),
                 initialized = true
+            )
+            // 同步悬浮小窗
+            MiniPlayerState.update(
+                title = currentPath.substringAfterLast('/').substringBeforeLast('.'),
+                isPlaying = exoPlayer.isPlaying,
+                albumArt = null,
+                filePath = currentPath,
             )
             com.example.fold.util.FoldLogger.i(TAG, "  → State updated: title=${_state.value.title}, idx=${_state.value.currentIndex}, playing=${_state.value.isPlaying}")
             loadAlbumArt(currentPath)
@@ -290,7 +297,11 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
         val newMode = (_state.value.loopMode + 1) % 3
         exoPlayer.repeatMode = if (newMode == 1) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
         _state.value = _state.value.copy(loopMode = newMode)
-        if (newMode == 2) generateShuffleQueue()
+        if (newMode == 2) {
+            generateShuffleQueue()
+        } else {
+            _state.value = _state.value.copy(shuffledDisplayOrder = emptyList())
+        }
     }
 
     /** Fisher-Yates 洗牌，保证每首歌播一次、不连续重复 */
@@ -311,13 +322,9 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
             shuffleQueue[0] = shuffleQueue[swapWith].also { shuffleQueue[swapWith] = shuffleQueue[0] }
         }
         shuffleIndex = 0
+        // 通知 UI 显示顺序
+        _state.value = _state.value.copy(shuffledDisplayOrder = shuffleQueue.toList())
         android.util.Log.d("AudioPlayer", "shuffle queue: $shuffleQueue")
-    }
-
-    fun toggleLyrics() {
-        if (_state.value.lyrics.isNotEmpty()) {
-            _state.value = _state.value.copy(showLyrics = !_state.value.showLyrics)
-        }
     }
 
     fun toggleImmersive() {
@@ -427,7 +434,7 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
         android.util.Log.d("AudioPlayer", "loadLyrics: lrc file=${lrcFile?.name}")
 
         if (lrcFile == null) {
-            _state.value = _state.value.copy(lyrics = emptyList(), currentLyricIndex = -1, showLyrics = false)
+            _state.value = _state.value.copy(lyrics = emptyList(), currentLyricIndex = -1)
             return
         }
 
