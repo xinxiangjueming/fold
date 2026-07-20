@@ -3,10 +3,6 @@ package com.example.fold.ui.player
 import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -26,12 +22,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -114,23 +109,23 @@ fun MiniPlayerFloatingWidget(
             ) {
                 // 左侧圆形封面（播放时缓慢旋转，暂停时停在当前位置）
                 val art = miniState.albumArt
-                val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition(label = "rotation")
-                val rotation by infiniteTransition.animateFloat(
-                    initialValue = 0f,
-                    targetValue = 360f,
-                    animationSpec = infiniteRepeatable(
-                        animation = tween(durationMillis = 8000, easing = LinearEasing),
-                        repeatMode = RepeatMode.Restart
-                    ),
-                    label = "rotation"
-                )
-                var pausedRotation by remember { mutableFloatStateOf(0f) }
-                var wasPlaying by remember { mutableStateOf(false) }
-                if (wasPlaying && !miniState.isPlaying) {
-                    pausedRotation = rotation
+                val rotationAnim = remember { androidx.compose.animation.core.Animatable(0f) }
+                val scope = rememberCoroutineScope()
+
+                LaunchedEffect(miniState.isPlaying) {
+                    if (miniState.isPlaying) {
+                        while (true) {
+                            rotationAnim.animateTo(
+                                targetValue = rotationAnim.value + 360f,
+                                animationSpec = tween(durationMillis = 8000, easing = LinearEasing)
+                            )
+                        }
+                    } else {
+                        rotationAnim.stop()
+                    }
                 }
-                wasPlaying = miniState.isPlaying
-                val currentRotation = if (miniState.isPlaying) rotation else pausedRotation
+
+                val currentRotation = rotationAnim.value
 
                 if (art != null) {
                     Image(

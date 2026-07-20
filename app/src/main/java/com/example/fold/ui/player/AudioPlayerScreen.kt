@@ -32,6 +32,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import top.yukonga.miuix.kmp.squircle.squircleSurface
@@ -266,78 +268,67 @@ fun AudioPlayerScreen(
         }
     } else {
     // ===== 竖屏布局 =====
-    var currentPage by remember { mutableIntStateOf(0) }
-    val offset = remember { androidx.compose.animation.core.Animatable(0f) }
+    val pagerState = rememberPagerState(pageCount = { 2 })
     val scope = rememberCoroutineScope()
-    val density = LocalDensity.current
-    val screenWidthPx = with(density) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
-    val screenWidth = LocalConfiguration.current.screenWidthDp.dp
 
-    // 页面切换时滑动偏移量
-    LaunchedEffect(currentPage) {
-        val target = if (currentPage == 0) 0f else -screenWidthPx
-        com.example.fold.util.FoldLogger.i("SwipeGesture", "pageSwitch: currentPage=$currentPage, targetOffset=${String.format("%.0f", target)}px")
-        offset.animateTo(target, animationSpec = tween(300))
+    // 记录页面切换
+    var lastSettledPage by remember { mutableIntStateOf(0) }
+    LaunchedEffect(pagerState.settledPage) {
+        val page = pagerState.settledPage
+        if (page != lastSettledPage) {
+            com.example.fold.util.FoldLogger.i("SwipeGesture", "pager settled: page=$page (was $lastSettledPage)")
+            lastSettledPage = page
+        }
     }
 
-    Box(Modifier.fillMaxSize()) {
-        // 两个页面并排，通过偏移量控制显示
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer { translationX = offset.value }
-        ) {
-            // 播放页
-            Box(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .width(screenWidth)
-            ) {
-                PlayerPage(
-                    albumArt = state.albumArt,
-                    isPlaying = state.isPlaying,
-                    title = state.title,
-                    currentIndex = state.currentIndex,
-                    playlistSize = state.playlistSize,
-                    duration = state.duration,
-                    initialized = state.initialized,
-                    isImmersive = state.isImmersive,
-                    loopMode = state.loopMode,
-                    sleepRemaining = state.sleepRemaining,
-                    onBack = onBack,
-                    onPrev = { vm.prev() },
-                    onTogglePlay = { vm.togglePlay() },
-                    onNext = { vm.next() },
-                    onLongPressToggle = { vm.toggleImmersive() },
-                    onLoopChange = { vm.cycleLoopMode() },
-                    onSleepClick = { showSleepDialog = true },
-                    onEqualizerClick = handleEqualizerClick,
-                    onPlaylistClick = { showPlaylist = true },
-                    exoPlayer = if (state.initialized) vm.exoPlayer else null,
-                    onSeek = { vm.seekTo(it) },
-                    onSwipeToLyrics = {
-                        com.example.fold.util.FoldLogger.i("SwipeGesture", "onSwipeToLyrics: currentPage 0->1")
-                        currentPage = 1
-                    },
-                    gestureEnabled = currentPage == 0
-                )
-            }
-            // 歌词页（垂直滚动由 LazyColumn 自然处理）
-            Box(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .width(screenWidth)
-            ) {
-                LyricsPage(
-                    lyrics = state.lyrics,
-                    currentLyricIndex = state.currentLyricIndex,
-                    listState = lyricsListState,
-                    onSwipeToPlayer = {
-                        com.example.fold.util.FoldLogger.i("SwipeGesture", "onSwipeToPlayer: currentPage 1->0")
-                        currentPage = 0
-                    }
-                )
-            }
+    com.example.fold.util.FoldLogger.i("SwipeGesture", " pagerState composed: currentPage=${pagerState.currentPage}")
+
+    HorizontalPager(
+        state = pagerState,
+        modifier = Modifier.fillMaxSize(),
+        userScrollEnabled = true,
+    ) { page: Int ->
+        if (page == 1) {
+            com.example.fold.util.FoldLogger.i("SwipeGesture", " pager composing page=1 (lyrics), lyricsSize=${state.lyrics.size}")
+        }
+        when (page) {
+            0 -> PlayerPage(
+                albumArt = state.albumArt,
+                isPlaying = state.isPlaying,
+                title = state.title,
+                currentIndex = state.currentIndex,
+                playlistSize = state.playlistSize,
+                duration = state.duration,
+                initialized = state.initialized,
+                isImmersive = state.isImmersive,
+                loopMode = state.loopMode,
+                sleepRemaining = state.sleepRemaining,
+                onBack = onBack,
+                onPrev = { vm.prev() },
+                onTogglePlay = { vm.togglePlay() },
+                onNext = { vm.next() },
+                onLongPressToggle = { vm.toggleImmersive() },
+                onLoopChange = { vm.cycleLoopMode() },
+                onSleepClick = { showSleepDialog = true },
+                onEqualizerClick = handleEqualizerClick,
+                onPlaylistClick = { showPlaylist = true },
+                exoPlayer = if (state.initialized) vm.exoPlayer else null,
+                onSeek = { vm.seekTo(it) },
+                onSwipeToLyrics = {
+                    com.example.fold.util.FoldLogger.i("SwipeGesture", "onSwipeToLyrics: page 0->1")
+                    scope.launch { pagerState.animateScrollToPage(1) }
+                },
+                gestureEnabled = pagerState.currentPage == 0 && !pagerState.isScrollInProgress
+            )
+            1 -> LyricsPage(
+                lyrics = state.lyrics,
+                currentLyricIndex = state.currentLyricIndex,
+                listState = lyricsListState,
+                onSwipeToPlayer = {
+                    com.example.fold.util.FoldLogger.i("SwipeGesture", "onSwipeToPlayer: page 1->0")
+                    scope.launch { pagerState.animateScrollToPage(0) }
+                }
+            )
         }
     }
     }
@@ -663,11 +654,15 @@ private fun LyricsPage(
     val onSurfaceVar = MaterialTheme.colorScheme.onSurfaceVariant
     val configuration = LocalConfiguration.current
 
+    // 歌词页首次 compose 日志
+    SideEffect {
+        com.example.fold.util.FoldLogger.i("LyricsPerf", "LyricsPage composed: lyrics=${lyrics.size}, currentIdx=$currentLyricIndex")
+    }
+
     // 歌词 recomposition 诊断
     var recomposeCount by remember { mutableIntStateOf(0) }
     SideEffect {
         recomposeCount++
-        // 每 50 次 recomposition 记录一次
         if (recomposeCount % 50 == 0) {
             com.example.fold.util.FoldLogger.i("LyricsPerf", "recompose: #$recomposeCount, " +
                 "lyricsSize=${lyrics.size}, currentIndex=$currentLyricIndex, " +
@@ -675,80 +670,54 @@ private fun LyricsPage(
         }
     }
 
-    var totalDragX by remember { mutableStateOf(0f) }
-    var lyricsDragCount by remember { mutableIntStateOf(0) }
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .pointerInput(Unit) {
-                detectHorizontalDragGestures(
-                    onDragStart = {
-                        totalDragX = 0f
-                        lyricsDragCount++
-                        com.example.fold.util.FoldLogger.i("SwipeGesture", "lyricsDragStart: #$lyricsDragCount")
-                    },
-                    onDragEnd = {
-                        val triggered = totalDragX > 30
-                        com.example.fold.util.FoldLogger.i("SwipeGesture", "lyricsDragEnd: totalX=${String.format("%.1f", totalDragX)}, triggered=$triggered")
-                        if (triggered) onSwipeToPlayer()
-                        totalDragX = 0f
-                    },
-                    onHorizontalDrag = { _, dragAmount ->
-                        totalDragX += dragAmount
-                    }
+    if (lyrics.isNotEmpty()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // 顶部 50% 屏幕高度空白
+            item(key = "top_spacer") {
+                Spacer(Modifier.height(configuration.screenHeightDp.dp / 2))
+            }
+
+            items(lyrics.size, key = { it }) { idx ->
+                val viewportCenter = listState.layoutInfo.viewportEndOffset / 2f
+                val itemInfo = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == idx }
+                val itemCenter = itemInfo?.let { it.offset + it.size / 2f } ?: viewportCenter
+                val distanceFromCenter = kotlin.math.abs(itemCenter - viewportCenter)
+                val maxDistance = listState.layoutInfo.viewportEndOffset / 2f
+                val normalizedDistance = if (maxDistance > 0f) {
+                    (distanceFromCenter / maxDistance).coerceIn(0f, 1f)
+                } else {
+                    if (idx == currentLyricIndex) 0f else 1f
+                }
+
+                val alpha = (1f - normalizedDistance * 0.8f).coerceIn(0.2f, 1f)
+                val fontSize = (20f - normalizedDistance * 6f).coerceAtLeast(14f)
+
+                Text(
+                    text = lyrics[idx].second,
+                    fontSize = fontSize.sp,
+                    color = if (idx == currentLyricIndex) onSurface
+                            else onSurfaceVar.copy(alpha = alpha),
+                    textAlign = TextAlign.Center,
+                    fontWeight = if (idx == currentLyricIndex) FontWeight.Bold else FontWeight.Normal,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp)
                 )
             }
-    ) {
-        if (lyrics.isNotEmpty()) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // 顶部 50% 屏幕高度空白
-                item(key = "top_spacer") {
-                    Spacer(Modifier.height(configuration.screenHeightDp.dp / 2))
-                }
 
-                items(lyrics.size, key = { it }) { idx ->
-                    val viewportCenter = listState.layoutInfo.viewportEndOffset / 2f
-                    val itemInfo = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == idx }
-                    val itemCenter = itemInfo?.let { it.offset + it.size / 2f } ?: viewportCenter
-                    val distanceFromCenter = kotlin.math.abs(itemCenter - viewportCenter)
-                    val maxDistance = listState.layoutInfo.viewportEndOffset / 2f
-                    val normalizedDistance = if (maxDistance > 0f) {
-                        (distanceFromCenter / maxDistance).coerceIn(0f, 1f)
-                    } else {
-                        if (idx == currentLyricIndex) 0f else 1f
-                    }
-
-                    // 直接计算，无动画 — 滚动本身就是动画
-                    val alpha = (1f - normalizedDistance * 0.8f).coerceIn(0.2f, 1f)
-                    val fontSize = (20f - normalizedDistance * 6f).coerceAtLeast(14f)
-
-                    Text(
-                        text = lyrics[idx].second,
-                        fontSize = fontSize.sp,
-                        color = if (idx == currentLyricIndex) onSurface
-                                else onSurfaceVar.copy(alpha = alpha),
-                        textAlign = TextAlign.Center,
-                        fontWeight = if (idx == currentLyricIndex) FontWeight.Bold else FontWeight.Normal,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 8.dp)
-                    )
-                }
-
-                // 底部 50% 屏幕高度空白
-                item(key = "bottom_spacer") {
-                    Spacer(Modifier.height(configuration.screenHeightDp.dp / 2))
-                }
+            // 底部 50% 屏幕高度空白
+            item(key = "bottom_spacer") {
+                Spacer(Modifier.height(configuration.screenHeightDp.dp / 2))
             }
-        } else {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(stringResource(R.string.reader_no_content),
-                    style = MaterialTheme.typography.bodyMedium, color = onSurfaceVar)
-            }
+        }
+    } else {
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
+            Text(stringResource(R.string.reader_no_content),
+                style = MaterialTheme.typography.bodyMedium, color = onSurfaceVar)
         }
     }
 }
