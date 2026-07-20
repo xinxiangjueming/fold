@@ -125,6 +125,7 @@ class UsbExclusiveAudioSink(
     private var usbStartMediaTimeUs: Long = 0L
     private var usbStartMediaTimeNeedsInit = true
     private var isPlaying = false
+    private var backpressureCount = 0L
 
     // ── Lifecycle ──────────────────────────────────────────────────
 
@@ -161,6 +162,10 @@ class UsbExclusiveAudioSink(
 
         // Backpressure: pace ExoPlayer to USB consumption rate
         if (audioQueue.size >= QUEUE_BACKPRESSURE_THRESHOLD) {
+            backpressureCount++
+            if (backpressureCount % 50L == 0L) {
+                Log.i(TAG, "backpressure: #$backpressureCount, queueSize=${audioQueue.size}, dropCount=$dropCount")
+            }
             return false
         }
 
@@ -188,6 +193,11 @@ class UsbExclusiveAudioSink(
                 snapshot.get(rawBytes)
                 enqueueRaw(rawBytes, currentEncoding)
             }
+        }
+
+        // 每 200 次记录一次队列状态
+        if (handleBufferCallCount % 200L == 0L) {
+            Log.i(TAG, "handleBuffer: #$handleBufferCallCount, queue=${audioQueue.size}, drops=$dropCount, backpressure=$backpressureCount")
         }
 
         // Consume buffer — delegate is muted so we skip its handleBuffer

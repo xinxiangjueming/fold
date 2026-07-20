@@ -11,6 +11,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import com.example.fold.audio.AudioFormat
 import com.example.fold.audio.DspRenderersFactory
+import com.example.fold.audio.PlaybackMemoryMonitor
 import com.example.fold.audio.UsbAudioDevice
 import com.example.fold.audio.UsbAudioDeviceManager
 import com.example.fold.audio.UsbAudioDeviceInfo
@@ -49,11 +50,13 @@ object MusicPlayerHolder {
 
     fun getOrCreate(context: Context): ExoPlayer {
         if (exoPlayer == null) {
+            val mode = if (isExclusiveMode.value && usbStream != null) "exclusive" else "normal"
             exoPlayer = if (isExclusiveMode.value && usbStream != null) {
                 buildExclusivePlayer(context)
             } else {
                 buildNormalPlayer(context)
             }
+            com.example.fold.util.FoldLogger.i(TAG, "ExoPlayer created: mode=$mode, sessionId=${exoPlayer?.audioSessionId}")
         }
         return exoPlayer!!
     }
@@ -156,10 +159,14 @@ object MusicPlayerHolder {
         exclusiveFormat = format
         usbDeviceInfo = deviceInfo
         isExclusiveMode.value = true
+        com.example.fold.util.FoldLogger.i(TAG, "Exclusive mode enabled: device=${device.productName}, " +
+            "format=${format.sampleRate}Hz/${format.bitDepth}bit/${format.channels}ch, " +
+            "epOut=0x${deviceInfo.endpointOut.toString(16)}, maxPkt=${deviceInfo.maxPacketSize}")
         return true
     }
 
     fun disableExclusiveMode(context: Context) {
+        val wasEnabled = isExclusiveMode.value
         isExclusiveMode.value = false
         exclusiveDevice = null
         exclusiveFormat = null
@@ -171,6 +178,9 @@ object MusicPlayerHolder {
         }
         usbStream = null
         usbDeviceInfo = null
+        if (wasEnabled) {
+            com.example.fold.util.FoldLogger.i(TAG, "Exclusive mode disabled")
+        }
     }
 
     /** Force reset all state (used when USB detach cleanup fails) */
@@ -209,10 +219,16 @@ object MusicPlayerHolder {
         player.seekTo(startIndex.coerceIn(0, paths.size - 1), 0)
         player.playWhenReady = true
 
+        // 启动内存监控
+        PlaybackMemoryMonitor.start()
+
         context.startForegroundService(Intent(context, MusicNotificationService::class.java))
     }
 
     fun release(context: Context) {
+        com.example.fold.util.FoldLogger.i(TAG, "release: playlist=${playlist.size}items, exclusive=${isExclusiveMode.value}")
+        // 停止内存监控
+        PlaybackMemoryMonitor.stop()
         mediaSession?.release()
         mediaSession = null
         // Stop player FIRST — triggers sink.release() which drains + releases stream

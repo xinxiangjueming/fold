@@ -1,6 +1,7 @@
 package com.example.fold.ui.player
 
 import android.content.Context
+import android.os.SystemClock
 import java.io.File
 import android.content.res.Configuration
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -103,12 +104,28 @@ fun AudioPlayerScreen(
     val lyricsListState = rememberLazyListState()
     val lyricScreenHeightPx = with(LocalDensity.current) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
 
+    // 歌词滚动性能诊断
+    var lyricScrollCount by remember { mutableIntStateOf(0) }
+    var lastScrollTime by remember { mutableLongStateOf(0L) }
+
     LaunchedEffect(state.currentLyricIndex, state.title) {
         if (state.currentLyricIndex >= 0 && state.currentLyricIndex < state.lyrics.size) {
+            val t0 = android.os.SystemClock.elapsedRealtime()
             lyricsListState.animateScrollToItem(
                 index = state.currentLyricIndex,
                 scrollOffset = (-lyricScreenHeightPx / 2).toInt()
             )
+            val t1 = android.os.SystemClock.elapsedRealtime()
+            lyricScrollCount++
+            val drift = t1 - lastScrollTime - 500
+            lastScrollTime = t1
+            // 每 10 次滚动记录一次性能
+            if (lyricScrollCount % 10 == 0) {
+                com.example.fold.util.FoldLogger.i("LyricsPerf", "scroll: #$lyricScrollCount, targetIdx=${state.currentLyricIndex}/${state.lyrics.size}, " +
+                    "animTime=${t1-t0}ms, drift=${drift}ms, " +
+                    "visibleItems=${lyricsListState.layoutInfo.visibleItemsInfo.size}, " +
+                    "totalItems=${lyricsListState.layoutInfo.totalItemsCount}")
+            }
         }
     }
 
@@ -256,6 +273,13 @@ fun AudioPlayerScreen(
     val screenWidthPx = with(density) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
     val screenWidth = LocalConfiguration.current.screenWidthDp.dp
 
+    // 页面切换时滑动偏移量
+    LaunchedEffect(currentPage) {
+        val target = if (currentPage == 0) 0f else -screenWidthPx
+        com.example.fold.util.FoldLogger.i("SwipeGesture", "pageSwitch: currentPage=$currentPage, targetOffset=${String.format("%.0f", target)}px")
+        offset.animateTo(target, animationSpec = tween(300))
+    }
+
     Box(Modifier.fillMaxSize()) {
         // 两个页面并排，通过偏移量控制显示
         Row(
@@ -291,23 +315,12 @@ fun AudioPlayerScreen(
                     onPlaylistClick = { showPlaylist = true },
                     exoPlayer = if (state.initialized) vm.exoPlayer else null,
                     onSeek = { vm.seekTo(it) },
-                    onSwipeToLyrics = { currentPage = 1 },
+                    onSwipeToLyrics = {
+                        com.example.fold.util.FoldLogger.i("SwipeGesture", "onSwipeToLyrics: currentPage 0->1")
+                        currentPage = 1
+                    },
                     gestureEnabled = currentPage == 0
                 )
-                // 非当前页时拦截所有触摸事件，防止 PlayerPage 手势拦截歌词页
-                if (currentPage != 0) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .pointerInput(Unit) {
-                                awaitPointerEventScope {
-                                    while (true) {
-                                        awaitPointerEvent().changes.forEach { it.consume() }
-                                    }
-                                }
-                            }
-                    )
-                }
             }
             // 歌词页（垂直滚动由 LazyColumn 自然处理）
             Box(
@@ -319,7 +332,10 @@ fun AudioPlayerScreen(
                     lyrics = state.lyrics,
                     currentLyricIndex = state.currentLyricIndex,
                     listState = lyricsListState,
-                    onSwipeToPlayer = { currentPage = 0 }
+                    onSwipeToPlayer = {
+                        com.example.fold.util.FoldLogger.i("SwipeGesture", "onSwipeToPlayer: currentPage 1->0")
+                        currentPage = 0
+                    }
                 )
             }
         }
@@ -524,6 +540,8 @@ private fun PlayerPage(
             animationSpec = androidx.compose.animation.core.tween(300),
             label = "coverScale"
         )
+        var coverDragX by remember { mutableFloatStateOf(0f) }
+        var coverDragCount by remember { mutableIntStateOf(0) }
         Box(
             modifier = Modifier
                 .size(260.dp)
@@ -536,9 +554,22 @@ private fun PlayerPage(
                     cornerRadius = 10.dp,
                 )
                 .pointerInput(gestureEnabled) {
-                    detectDragGestures { _, dragAmount ->
-                        if (gestureEnabled && dragAmount.x < -30) onSwipeToLyrics()
-                    }
+                    detectHorizontalDragGestures(
+                        onDragStart = {
+                            coverDragX = 0f
+                            coverDragCount++
+                            com.example.fold.util.FoldLogger.i("SwipeGesture", "coverDragStart: #$coverDragCount, gestureEnabled=$gestureEnabled")
+                        },
+                        onDragEnd = {
+                            val triggered = gestureEnabled && coverDragX < -30
+                            com.example.fold.util.FoldLogger.i("SwipeGesture", "coverDragEnd: totalX=${String.format("%.1f", coverDragX)}, gestureEnabled=$gestureEnabled, triggered=$triggered")
+                            if (triggered) onSwipeToLyrics()
+                            coverDragX = 0f
+                        },
+                        onHorizontalDrag = { _, dragAmount ->
+                            coverDragX += dragAmount
+                        }
+                    )
                 },
             contentAlignment = Alignment.Center
         ) {
@@ -632,15 +663,34 @@ private fun LyricsPage(
     val onSurfaceVar = MaterialTheme.colorScheme.onSurfaceVariant
     val configuration = LocalConfiguration.current
 
+    // 歌词 recomposition 诊断
+    var recomposeCount by remember { mutableIntStateOf(0) }
+    SideEffect {
+        recomposeCount++
+        // 每 50 次 recomposition 记录一次
+        if (recomposeCount % 50 == 0) {
+            com.example.fold.util.FoldLogger.i("LyricsPerf", "recompose: #$recomposeCount, " +
+                "lyricsSize=${lyrics.size}, currentIndex=$currentLyricIndex, " +
+                "visibleItems=${listState.layoutInfo.visibleItemsInfo.size}")
+        }
+    }
+
     var totalDragX by remember { mutableStateOf(0f) }
+    var lyricsDragCount by remember { mutableIntStateOf(0) }
     Box(
         modifier = Modifier
             .fillMaxSize()
             .pointerInput(Unit) {
                 detectHorizontalDragGestures(
-                    onDragStart = { totalDragX = 0f },
+                    onDragStart = {
+                        totalDragX = 0f
+                        lyricsDragCount++
+                        com.example.fold.util.FoldLogger.i("SwipeGesture", "lyricsDragStart: #$lyricsDragCount")
+                    },
                     onDragEnd = {
-                        if (totalDragX > 30) onSwipeToPlayer()
+                        val triggered = totalDragX > 30
+                        com.example.fold.util.FoldLogger.i("SwipeGesture", "lyricsDragEnd: totalX=${String.format("%.1f", totalDragX)}, triggered=$triggered")
+                        if (triggered) onSwipeToPlayer()
                         totalDragX = 0f
                     },
                     onHorizontalDrag = { _, dragAmount ->
@@ -801,7 +851,7 @@ private fun IndependentProgressBar(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    formatTime(if (duration > 0) pos else 0),
+                    formatTime(if (duration > 0) displayPos else 0),
                     style = MiuixTheme.textStyles.footnote1,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (isDragging) 0.4f else 1f)
                 )
@@ -941,7 +991,23 @@ private fun SleepTimerDialog(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        dragHandle = null
+        tonalElevation = 0.dp,
+        dragHandle = {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp, bottom = 4.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    Modifier
+                        .width(40.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                )
+            }
+        }
     ) {
         Column(
             modifier = Modifier
@@ -952,7 +1018,7 @@ private fun SleepTimerDialog(
             Text(
                 stringResource(R.string.sleep_timer_title),
                 style = MiuixTheme.textStyles.main,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                 textAlign = TextAlign.Center
             )
 
@@ -1171,7 +1237,23 @@ private fun PlaylistDialog(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        dragHandle = null
+        tonalElevation = 0.dp,
+        dragHandle = {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp, bottom = 4.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    Modifier
+                        .width(40.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                )
+            }
+        }
     ) {
         Column(
             modifier = Modifier
@@ -1181,7 +1263,7 @@ private fun PlaylistDialog(
             Text(
                 stringResource(R.string.playlist_title),
                 style = MiuixTheme.textStyles.main,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 6.dp),
                 textAlign = TextAlign.Center
             )
             Spacer(Modifier.height(8.dp))

@@ -212,6 +212,7 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
                 val idx = exoPlayer.currentMediaItemIndex
                 val path = resolvedPlaylist.getOrNull(idx) ?: ""
                 val newTitle = path.substringAfterLast('/').substringBeforeLast('.')
+                MusicPlayerHolder.lastFilePath = path
                 _state.value = _state.value.copy(
                     currentIndex = idx,
                     title = newTitle,
@@ -240,10 +241,18 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
     private fun startPolling() {
         // 歌词索引轮询（500ms，仅歌词行变化才更新 state → 只触发歌词区重绘）
         viewModelScope.launch {
+            var lastPollTime = android.os.SystemClock.elapsedRealtime()
             while (isActive) {
                 delay(500)
+                val now = android.os.SystemClock.elapsedRealtime()
+                val drift = now - lastPollTime - 500
+                lastPollTime = now
                 if (MusicPlayerHolder.isActive() && _state.value.lyrics.isNotEmpty()) {
                     updateLyricIndex(exoPlayer.currentPosition)
+                    // 每 60 次（30秒）记录一次轮询漂移
+                    if (lyricUpdateCount % 60 == 0) {
+                        com.example.fold.util.FoldLogger.i(TAG, "pollDrift: actual=${now - (now - drift - 500)}ms, drift=${drift}ms, lyrics=${_state.value.lyrics.size}lines")
+                    }
                 }
             }
         }
@@ -393,12 +402,14 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
     // ===== 歌词 =====
 
     private fun loadLyrics(audioPath: String) {
-        android.util.Log.d("AudioPlayer", "loadLyrics: path=$audioPath")
+        val t0 = android.os.SystemClock.elapsedRealtime()
+        com.example.fold.util.FoldLogger.i(TAG, "loadLyrics: path=$audioPath")
 
         // 先尝试从音频文件元数据读取嵌入歌词
         val embedded = readEmbeddedLyrics(audioPath)
         if (embedded != null && embedded.isNotBlank()) {
-            android.util.Log.d("AudioPlayer", "loadLyrics: found embedded lyrics, len=${embedded.length}")
+            val t1 = android.os.SystemClock.elapsedRealtime()
+            com.example.fold.util.FoldLogger.i(TAG, "loadLyrics: source=embedded, len=${embedded.length}, parseTime=${t1-t0}ms")
             parseAndSetLyrics(embedded)
             return
         }
@@ -408,18 +419,23 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
         val baseName = audioFile.nameWithoutExtension
         val parentDir = audioFile.parentFile
         val allLrc = parentDir?.listFiles()?.filter { it.extension.equals("lrc", true) } ?: emptyList()
-        android.util.Log.d("AudioPlayer", "loadLyrics: no embedded, dir lrc files=${allLrc.map { it.name }}")
+        com.example.fold.util.FoldLogger.i(TAG, "loadLyrics: no embedded, dir=${parentDir?.absolutePath}, lrcCount=${allLrc.size}, files=${allLrc.map { it.name }}")
 
         var lrcFile = File(parentDir, "$baseName.lrc").takeIf { it.exists() && it.length() > 0 }
-        if (lrcFile == null) {
+        var matchMethod = ""
+        if (lrcFile != null) {
+            matchMethod = "exact"
+        } else {
             lrcFile = allLrc.firstOrNull { lrc ->
                 baseName.startsWith(lrc.nameWithoutExtension, ignoreCase = true)
             }
+            if (lrcFile != null) matchMethod = "prefix"
         }
         if (lrcFile == null) {
             lrcFile = allLrc.firstOrNull { lrc ->
                 lrc.nameWithoutExtension.contains(baseName, ignoreCase = true)
             }
+            if (lrcFile != null) matchMethod = "contains"
         }
         if (lrcFile == null) {
             val stripped = baseName.replace(Regex("""[-_]\d{4,}$"""), "")
@@ -428,22 +444,28 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
                     lrc.nameWithoutExtension.equals(stripped, ignoreCase = true) ||
                     stripped.startsWith(lrc.nameWithoutExtension, ignoreCase = true)
                 }
+                if (lrcFile != null) matchMethod = "stripped"
             }
         }
 
-        android.util.Log.d("AudioPlayer", "loadLyrics: lrc file=${lrcFile?.name}")
+        com.example.fold.util.FoldLogger.i(TAG, "loadLyrics: lrcFile=${lrcFile?.name}, matchMethod=$matchMethod")
 
         if (lrcFile == null) {
+            com.example.fold.util.FoldLogger.i(TAG, "loadLyrics: no lyrics found, duration=${_state.value.duration}ms")
             _state.value = _state.value.copy(lyrics = emptyList(), currentLyricIndex = -1)
             return
         }
 
         try {
+            val t1 = android.os.SystemClock.elapsedRealtime()
             val bytes = lrcFile.readBytes()
             val text = decodeText(bytes)
+            val t2 = android.os.SystemClock.elapsedRealtime()
+            com.example.fold.util.FoldLogger.i(TAG, "loadLyrics: source=external, file=${lrcFile.name}, " +
+                "fileSize=${bytes.size}B, decodeTime=${t2-t1}ms")
             parseAndSetLyrics(text)
         } catch (e: Exception) {
-            android.util.Log.e("AudioPlayer", "loadLyrics lrc file failed", e)
+            com.example.fold.util.FoldLogger.e(TAG, "loadLyrics lrc file failed: ${e.message}")
             _state.value = _state.value.copy(lyrics = emptyList())
         }
     }
@@ -561,14 +583,18 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
     /** 解析歌词文本（LRC 格式时间标签 + 纯文本） */
     private fun parseAndSetLyrics(text: String) {
+        val t0 = android.os.SystemClock.elapsedRealtime()
         val timeRegex = Regex("""\[(\d{1,3}):(\d{2})[.:](\d{2,3})]|\[(\d{1,3}):(\d{2})]""")
         val parsed = mutableListOf<Pair<Long, String>>()
         var hasTimedLyrics = false
+        var matchCount = 0
+        val totalLines = text.lines().size
 
         text.lines().forEach { line ->
             val times = mutableListOf<Long>()
             timeRegex.findAll(line).forEach { m ->
                 hasTimedLyrics = true
+                matchCount++
                 if (m.groupValues[1].isNotEmpty()) {
                     val ms = m.groupValues[3].toLong().let { if (it < 100) it * 10 else it }
                     times.add(m.groupValues[1].toLong() * 60000 + m.groupValues[2].toLong() * 1000 + ms)
@@ -597,16 +623,31 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
             parsed.forEachIndexed { i, pair -> parsed[i] = (i * interval) to pair.second }
         }
 
-        _state.value = _state.value.copy(lyrics = parsed.sortedBy { it.first }, currentLyricIndex = -1)
-        android.util.Log.d("AudioPlayer", "loadLyrics: parsed ${parsed.size} lines, timed=$hasTimedLyrics")
+        val sorted = parsed.sortedBy { it.first }
+        val t1 = android.os.SystemClock.elapsedRealtime()
+        val timeSpan = if (sorted.isNotEmpty() && sorted.last().first > 0) {
+            "${sorted.first().first}ms-${sorted.last().first}ms"
+        } else "N/A"
+        com.example.fold.util.FoldLogger.i(TAG, "parseLyrics: totalLines=$totalLines, matches=$matchCount, " +
+            "parsedEntries=${parsed.size}, timed=$hasTimedLyrics, timeSpan=$timeSpan, parseTime=${t1-t0}ms")
+        _state.value = _state.value.copy(lyrics = sorted, currentLyricIndex = -1)
     }
+
+    private var lyricUpdateCount = 0
 
     fun updateLyricIndex(position: Long) {
         val lyrics = _state.value.lyrics
         if (lyrics.isEmpty()) return
+        val t0 = android.os.SystemClock.elapsedRealtime()
         val idx = lyrics.indexOfLast { it.first <= position }
+        val t1 = android.os.SystemClock.elapsedRealtime()
         if (idx != _state.value.currentLyricIndex) {
             _state.value = _state.value.copy(currentLyricIndex = idx)
+        }
+        lyricUpdateCount++
+        // 每 10 次记录一次
+        if (lyricUpdateCount % 10 == 0) {
+            com.example.fold.util.FoldLogger.i(TAG, "lyricUpdate: #$lyricUpdateCount, pos=${position}ms, idx=$idx/${lyrics.size}, scanTime=${t1-t0}ms")
         }
     }
 
@@ -615,11 +656,33 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
     private fun loadAlbumArt(path: String) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
+                val t0 = android.os.SystemClock.elapsedRealtime()
                 val retriever = MediaMetadataRetriever()
                 retriever.setDataSource(path)
                 val art = retriever.embeddedPicture
-                val bitmap = if (art != null) BitmapFactory.decodeByteArray(art, 0, art.size) else null
+                val t1 = android.os.SystemClock.elapsedRealtime()
+                val bitmap = if (art != null) {
+                    val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeByteArray(art, 0, art.size, opts)
+                    val origW = opts.outWidth
+                    val origH = opts.outHeight
+                    // 降采样：如果图片 > 512px，用 inSampleSize 缩小
+                    var sampleSize = 1
+                    while (origW / sampleSize > 512 || origH / sampleSize > 512) {
+                        sampleSize *= 2
+                    }
+                    val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+                    BitmapFactory.decodeByteArray(art, 0, art.size, decodeOpts)
+                } else null
+                val t2 = android.os.SystemClock.elapsedRealtime()
                 retriever.release()
+                if (bitmap != null) {
+                    com.example.fold.util.FoldLogger.i(TAG, "albumArt: size=${bitmap.width}x${bitmap.height}, " +
+                        "byteCount=${bitmap.byteCount / 1024}KB, rawSize=${art?.size ?: 0}B, " +
+                        "fetchTime=${t1-t0}ms, decodeTime=${t2-t1}ms")
+                } else {
+                    com.example.fold.util.FoldLogger.i(TAG, "albumArt: none, fetchTime=${t1-t0}ms")
+                }
                 _state.value = _state.value.copy(albumArt = bitmap)
                 // 同步悬浮小窗封面
                 MiniPlayerState.update(
@@ -628,7 +691,8 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
                     albumArt = bitmap,
                     filePath = path,
                 )
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                com.example.fold.util.FoldLogger.e(TAG, "albumArt failed: ${e.message}")
                 _state.value = _state.value.copy(albumArt = null)
             }
         }

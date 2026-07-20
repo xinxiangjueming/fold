@@ -70,6 +70,8 @@ class DspAudioSink(
         return delegate.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
     }
 
+    private var totalDspTimeNs = 0L
+
     private fun applyDspProcessing(buffer: ByteBuffer) {
         val engine = dspEngine ?: return
         if (!engine.isReady) return
@@ -80,12 +82,16 @@ class DspAudioSink(
         val floatArray = FloatArray(floatBuffer.remaining())
         floatBuffer.get(floatArray)
 
+        val t0 = android.os.SystemClock.elapsedRealtimeNanos()
         engine.processAudio(floatArray)
+        val t1 = android.os.SystemClock.elapsedRealtimeNanos()
+        totalDspTimeNs += (t1 - t0)
 
-        // Log every 1000th buffer to confirm DSP is processing
         processCount++
-        if (processCount % 1000 == 1) {
-            Log.d(TAG, "DSP processing: buffer #$processCount, samples=${floatArray.size}")
+        // 每 1000 次记录一次平均 DSP 处理耗时
+        if (processCount % 1000 == 0) {
+            val avgUs = totalDspTimeNs / 1000.0 / processCount
+            Log.i(TAG, "DSP: #$processCount, samples=${floatArray.size}, avgTime=${String.format("%.1f", avgUs)}us")
         }
 
         buffer.position(position)

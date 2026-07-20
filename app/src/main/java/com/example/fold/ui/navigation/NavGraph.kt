@@ -213,6 +213,16 @@ fun AppNavGraph(navController: NavHostController) {
                 kotlinx.coroutines.delay(500)
                 val p = MusicPlayerHolder.exoPlayer ?: break
                 MiniPlayerState.updatePlaying(p.isPlaying)
+                // 同步当前播放歌曲（ViewModel 销毁后 onMediaItemTransition 不再触发）
+                val curPath = MusicPlayerHolder.lastFilePath
+                if (curPath.isNotEmpty() && MiniPlayerState.state.value.filePath != curPath) {
+                    MiniPlayerState.update(
+                        title = curPath.substringAfterLast('/').substringBeforeLast('.'),
+                        isPlaying = p.isPlaying,
+                        albumArt = null,
+                        filePath = curPath,
+                    )
+                }
             }
         }
     }
