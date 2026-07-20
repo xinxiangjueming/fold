@@ -31,6 +31,10 @@ object MusicPlayerHolder {
         private set
     @Volatile var lastFilePath: String = ""
 
+    // 歌词缓存：key=歌曲路径, value=解析后的歌词列表
+    @Volatile var cachedLyrics: List<Pair<Long, String>> = emptyList()
+    @Volatile var cachedLyricsPath: String = ""
+
     @Volatile var usbDeviceInfo: UsbAudioDeviceInfo? = null
         private set
     @Volatile var usbStream: UsbAudioStream? = null
@@ -235,6 +239,8 @@ object MusicPlayerHolder {
         exoPlayer?.release()
         exoPlayer = null
         playlist = emptyList()
+        cachedLyrics = emptyList()
+        cachedLyricsPath = ""
         // Safety: drain + release stream if sink didn't (idempotent)
         try {
             usbStream?.drain()

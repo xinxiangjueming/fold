@@ -203,6 +203,8 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_READY) {
                     _state.value = _state.value.copy(duration = exoPlayer.duration)
+                    // duration 可用后，重新解析纯文本歌词（之前 duration=0 导致时间戳全为 0）
+                    reparseLyricsIfPlain()
                 }
                 if (playbackState == Player.STATE_ENDED) {
                     handleTrackEnded()
@@ -401,16 +403,37 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
     // ===== 歌词 =====
 
+    /** 上一次加载歌词的路径，用于 duration 变化时重新解析纯文本歌词 */
+    private var lastLyricsRawText: String? = null
+    private var lastLyricsIsTimed: Boolean = true
+
     private fun loadLyrics(audioPath: String) {
         val t0 = android.os.SystemClock.elapsedRealtime()
         com.example.fold.util.FoldLogger.i(TAG, "loadLyrics: path=$audioPath")
 
+        // 检查缓存
+        if (MusicPlayerHolder.cachedLyricsPath == audioPath && MusicPlayerHolder.cachedLyrics.isNotEmpty()) {
+            com.example.fold.util.FoldLogger.i(TAG, "loadLyrics: using cache, ${MusicPlayerHolder.cachedLyrics.size} entries")
+            _state.value = _state.value.copy(lyrics = MusicPlayerHolder.cachedLyrics, currentLyricIndex = -1)
+            lastLyricsRawText = null
+            return
+        }
+
+        // 文件 I/O 移到后台线程
+        viewModelScope.launch(Dispatchers.IO) {
+            loadLyricsInternal(audioPath, t0)
+        }
+    }
+
+    private suspend fun loadLyricsInternal(audioPath: String, t0: Long) {
         // 先尝试从音频文件元数据读取嵌入歌词
         val embedded = readEmbeddedLyrics(audioPath)
         if (embedded != null && embedded.isNotBlank()) {
             val t1 = android.os.SystemClock.elapsedRealtime()
             com.example.fold.util.FoldLogger.i(TAG, "loadLyrics: source=embedded, len=${embedded.length}, parseTime=${t1-t0}ms")
-            parseAndSetLyrics(embedded)
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                parseAndSetLyrics(embedded)
+            }
             return
         }
 
@@ -426,33 +449,62 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
         if (lrcFile != null) {
             matchMethod = "exact"
         } else {
+            // 1. 前缀匹配：baseName 以 LRC 文件名开头
             lrcFile = allLrc.firstOrNull { lrc ->
                 baseName.startsWith(lrc.nameWithoutExtension, ignoreCase = true)
             }
             if (lrcFile != null) matchMethod = "prefix"
         }
         if (lrcFile == null) {
+            // 2. 反向包含：baseName 包含 LRC 文件名（LRC 名通常更短）
+            lrcFile = allLrc.firstOrNull { lrc ->
+                baseName.contains(lrc.nameWithoutExtension, ignoreCase = true) && lrc.nameWithoutExtension.length >= 3
+            }
+            if (lrcFile != null) matchMethod = "basenameContains"
+        }
+        if (lrcFile == null) {
+            // 3. 正向包含：LRC 文件名包含 baseName
             lrcFile = allLrc.firstOrNull { lrc ->
                 lrc.nameWithoutExtension.contains(baseName, ignoreCase = true)
             }
-            if (lrcFile != null) matchMethod = "contains"
+            if (lrcFile != null) matchMethod = "lrcContains"
         }
         if (lrcFile == null) {
+            // 4. 去除尾部时间戳/数字后匹配
+            //    例如 "世界第一公主殿下-初音ミク-20670111_1620487619422" → "世界第一公主殿下-初音ミク"
             val stripped = baseName.replace(Regex("""[-_]\d{4,}$"""), "")
-            if (stripped != baseName) {
+                .replace(Regex("""[-_]\d{4}[-_]\d{2}[-_]\d{2}.*$"""), "")  // 去掉 YYYY-MM-DD 及之后
+                .replace(Regex("""[-_]\d{8,}.*$"""), "")  // 去掉 8 位以上纯数字及之后
+                .trimEnd('-', '_')
+            if (stripped != baseName && stripped.length >= 2) {
                 lrcFile = allLrc.firstOrNull { lrc ->
-                    lrc.nameWithoutExtension.equals(stripped, ignoreCase = true) ||
-                    stripped.startsWith(lrc.nameWithoutExtension, ignoreCase = true)
+                    val lrcName = lrc.nameWithoutExtension
+                    lrcName.equals(stripped, ignoreCase = true) ||
+                    stripped.startsWith(lrcName, ignoreCase = true) ||
+                    lrcName.startsWith(stripped, ignoreCase = true)
                 }
                 if (lrcFile != null) matchMethod = "stripped"
+            }
+        }
+        if (lrcFile == null) {
+            // 5. 取 baseName 前半部分（第一个 - 之前或完整名称）做模糊匹配
+            val shortName = baseName.split(Regex("""[-_]""")).firstOrNull { it.length >= 3 } ?: ""
+            if (shortName.isNotEmpty()) {
+                lrcFile = allLrc.firstOrNull { lrc ->
+                    val lrcName = lrc.nameWithoutExtension
+                    lrcName.contains(shortName, ignoreCase = true) || shortName.contains(lrcName, ignoreCase = true)
+                }
+                if (lrcFile != null) matchMethod = "fuzzy"
             }
         }
 
         com.example.fold.util.FoldLogger.i(TAG, "loadLyrics: lrcFile=${lrcFile?.name}, matchMethod=$matchMethod")
 
         if (lrcFile == null) {
-            com.example.fold.util.FoldLogger.i(TAG, "loadLyrics: no lyrics found, duration=${_state.value.duration}ms")
-            _state.value = _state.value.copy(lyrics = emptyList(), currentLyricIndex = -1)
+            com.example.fold.util.FoldLogger.i(TAG, "loadLyrics: no lyrics found")
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                _state.value = _state.value.copy(lyrics = emptyList(), currentLyricIndex = -1)
+            }
             return
         }
 
@@ -463,10 +515,14 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
             val t2 = android.os.SystemClock.elapsedRealtime()
             com.example.fold.util.FoldLogger.i(TAG, "loadLyrics: source=external, file=${lrcFile.name}, " +
                 "fileSize=${bytes.size}B, decodeTime=${t2-t1}ms")
-            parseAndSetLyrics(text)
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                parseAndSetLyrics(text)
+            }
         } catch (e: Exception) {
             com.example.fold.util.FoldLogger.e(TAG, "loadLyrics lrc file failed: ${e.message}")
-            _state.value = _state.value.copy(lyrics = emptyList())
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                _state.value = _state.value.copy(lyrics = emptyList())
+            }
         }
     }
 
@@ -533,7 +589,7 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
-    /** 从 Vorbis Comments 数据中提取 LYRICS / SYNCEDLYRICS */
+    /** 从 Vorbis Comments 数据中提取歌词字段 */
     private fun parseVorbisLyrics(data: ByteArray): String? {
         try {
             var pos = 0
@@ -553,6 +609,12 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
                         ((data[pos+3].toInt() and 0xFF) shl 24)
             pos += 4
 
+            // 支持的歌词字段名（按优先级排序）
+            val lyricsFields = setOf(
+                "LYRICS", "SYNCEDLYRICS", "LYRIC", "UNSYNCEDLYRICS",
+                "LYRICSynchronised", "LYRICSYNC", "SYNCED_LYRICS"
+            )
+
             for (i in 0 until count) {
                 if (pos + 4 > data.size) break
                 val len = (data[pos].toInt() and 0xFF) or
@@ -564,9 +626,10 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
                 val entry = String(data, pos, len, Charsets.UTF_8)
                 pos += len
 
-                val upper = entry.uppercase()
-                if (upper.startsWith("LYRICS=") || upper.startsWith("SYNCEDLYRICS=")) {
-                    return entry.substringAfter('=')
+                val key = entry.substringBefore('=', "").uppercase()
+                if (key in lyricsFields) {
+                    val value = entry.substringAfter('=')
+                    if (value.isNotBlank()) return value
                 }
             }
         } catch (_: Exception) {}
@@ -616,11 +679,16 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
             }
         }
 
+        // 缓存原始文本和类型，用于 duration 变化时重新解析
+        lastLyricsRawText = text
+        lastLyricsIsTimed = hasTimedLyrics
+
         // 如果是纯文本歌词（无时间标签），按行均分时间
         if (!hasTimedLyrics && parsed.isNotEmpty()) {
             val duration = _state.value.duration.coerceAtLeast(1000)
             val interval = duration / parsed.size
             parsed.forEachIndexed { i, pair -> parsed[i] = (i * interval) to pair.second }
+            com.example.fold.util.FoldLogger.i(TAG, "parseLyrics: plain text, duration=${duration}ms, interval=${interval}ms")
         }
 
         val sorted = parsed.sortedBy { it.first }
@@ -631,6 +699,20 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
         com.example.fold.util.FoldLogger.i(TAG, "parseLyrics: totalLines=$totalLines, matches=$matchCount, " +
             "parsedEntries=${parsed.size}, timed=$hasTimedLyrics, timeSpan=$timeSpan, parseTime=${t1-t0}ms")
         _state.value = _state.value.copy(lyrics = sorted, currentLyricIndex = -1)
+
+        // 缓存到 MusicPlayerHolder
+        MusicPlayerHolder.cachedLyrics = sorted
+        MusicPlayerHolder.cachedLyricsPath = MusicPlayerHolder.lastFilePath
+    }
+
+    /** duration 变化时重新解析纯文本歌词 */
+    private fun reparseLyricsIfPlain() {
+        val raw = lastLyricsRawText ?: return
+        if (lastLyricsIsTimed) return
+        val duration = _state.value.duration
+        if (duration <= 0) return
+        com.example.fold.util.FoldLogger.i(TAG, "reparseLyricsIfPlain: duration=${duration}ms, re-parsing plain text lyrics")
+        parseAndSetLyrics(raw)
     }
 
     private var lyricUpdateCount = 0
