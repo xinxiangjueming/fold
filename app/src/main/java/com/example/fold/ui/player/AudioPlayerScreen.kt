@@ -281,16 +281,33 @@ fun AudioPlayerScreen(
         }
     }
 
-    com.example.fold.util.FoldLogger.i("SwipeGesture", " pagerState composed: currentPage=${pagerState.currentPage}")
+    // 帧间隔测量（滑动时每帧记录）
+    var lastFrameTimeNanos by remember { mutableLongStateOf(0L) }
+    var frameDropCount by remember { mutableIntStateOf(0) }
+    var frameCount by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            withFrameNanos { nanos ->
+                if (lastFrameTimeNanos > 0) {
+                    val deltaMs = (nanos - lastFrameTimeNanos) / 1_000_000
+                    if (deltaMs > 20) {
+                        frameDropCount++
+                        if (frameDropCount <= 5 || frameDropCount % 100 == 0) {
+                            com.example.fold.util.FoldLogger.i("SwipePerf", "frameDrop #$frameDropCount: ${deltaMs}ms")
+                        }
+                    }
+                    frameCount++
+                }
+                lastFrameTimeNanos = nanos
+            }
+        }
+    }
 
     HorizontalPager(
         state = pagerState,
         modifier = Modifier.fillMaxSize(),
         userScrollEnabled = true,
     ) { page: Int ->
-        if (page == 1) {
-            com.example.fold.util.FoldLogger.i("SwipeGesture", " pager composing page=1 (lyrics), lyricsSize=${state.lyrics.size}")
-        }
         when (page) {
             0 -> PlayerPage(
                 albumArt = state.albumArt,
@@ -654,23 +671,12 @@ private fun LyricsPage(
     val onSurfaceVar = MaterialTheme.colorScheme.onSurfaceVariant
     val configuration = LocalConfiguration.current
 
-    // 歌词页首次 compose 日志
-    SideEffect {
-        com.example.fold.util.FoldLogger.i("LyricsPerf", "LyricsPage composed: lyrics=${lyrics.size}, currentIdx=$currentLyricIndex")
-    }
-
-    // 歌词 recomposition 诊断
-    var recomposeCount by remember { mutableIntStateOf(0) }
-    SideEffect {
-        recomposeCount++
-        if (recomposeCount % 50 == 0) {
-            com.example.fold.util.FoldLogger.i("LyricsPerf", "recompose: #$recomposeCount, " +
-                "lyricsSize=${lyrics.size}, currentIndex=$currentLyricIndex, " +
-                "visibleItems=${listState.layoutInfo.visibleItemsInfo.size}")
-        }
-    }
-
     if (lyrics.isNotEmpty()) {
+        // 预计算布局信息，避免在 items 内重复访问
+        val layoutInfo by remember { derivedStateOf { listState.layoutInfo } }
+        val viewportCenter = layoutInfo.viewportEndOffset / 2f
+        val maxDistance = layoutInfo.viewportEndOffset / 2f
+
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
@@ -682,11 +688,9 @@ private fun LyricsPage(
             }
 
             items(lyrics.size, key = { it }) { idx ->
-                val viewportCenter = listState.layoutInfo.viewportEndOffset / 2f
-                val itemInfo = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == idx }
+                val itemInfo = layoutInfo.visibleItemsInfo.firstOrNull { it.index == idx }
                 val itemCenter = itemInfo?.let { it.offset + it.size / 2f } ?: viewportCenter
                 val distanceFromCenter = kotlin.math.abs(itemCenter - viewportCenter)
-                val maxDistance = listState.layoutInfo.viewportEndOffset / 2f
                 val normalizedDistance = if (maxDistance > 0f) {
                     (distanceFromCenter / maxDistance).coerceIn(0f, 1f)
                 } else {
